@@ -37,3 +37,14 @@ next-env.d.ts
 /outputs/
 /work/
 /.runtime/
+
+# generated test data and screenshots
+/tests/browser-output/
+/tests/simulation-results.json
+/tests/content-review.json
+/tests/content-review.md
+/audit/**/*.png
+/audit/**/*.json
+
+# TypeScript incremental build cache
+*.tsbuildinfo
