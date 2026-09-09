@@ -29,7 +29,7 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
       });
-      res.end(JSON.stringify({ app: 'bianliang-homecoming', version: '1.0' }));
+      res.end(JSON.stringify({ app: 'bianliang-homecoming', version: '2.0-long-game' }));
       return;
     }
     const path = resolve(root, '.' + decodeURIComponent(url.pathname));

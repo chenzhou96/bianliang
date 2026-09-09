@@ -1,186 +1,302 @@
-import { createRequire } from 'node:module';
+import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-const require = createRequire(import.meta.url);
-const { chromium } = require(
-  process.env.PLAYWRIGHT_MODULE || 'playwright-core',
-);
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
-const context = await browser.newContext({
-  viewport: { width: 1440, height: 1050 },
-});
-const page = await context.newPage();
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
+import { newGame } from '../lib/game/engine.ts';
+import { EVENTS, INFO_TEMPLATES } from '../lib/game/content.ts';
+import { EQUIPMENT_IDS } from '../lib/game/config.ts';
 const output = 'tests/browser-output';
 mkdirSync(output, { recursive: true });
-const save = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v1')));
-try {
-  await page.goto(process.env.GAME_URL || 'http://127.0.0.1:4173');
-  await page.getByRole('button', { name: '走进汴梁 →' }).click();
-  await page.getByRole('button', { name: '茶馆听消息', exact: false }).click();
-  await page.getByRole('tab', { name: '情报', exact: true }).click();
-  assert.equal((await save()).cash, 792);
-  await page.getByRole('button', { name: '州桥市', exact: false }).click();
-  await page.getByRole('spinbutton', { name: '粟米数量' }).fill('20');
-  await page
-    .getByRole('row')
-    .filter({ has: page.getByRole('spinbutton', { name: '粟米数量' }) })
-    .getByRole('button', { name: '买入', exact: true })
-    .click();
-  await page
-    .getByRole('row')
-    .filter({ has: page.getByRole('spinbutton', { name: '母鸡数量' }) })
-    .getByRole('button', { name: '买入', exact: true })
-    .click();
-  assert.equal((await save()).cash, 246);
-  await page.screenshot({
-    path: output + '/market-desktop.png',
-    fullPage: true,
-  });
-  await page.getByRole('button', { name: '离开市场', exact: true }).click();
-  await page.getByRole('spinbutton', { name: '喂鸡数量' }).fill('1');
-  await page.getByRole('button', { name: '安排妥当，度过这一夜 →' }).click();
-  const day2 = await save();
-  assert.equal(day2.day, 2);
-  assert.equal(day2.cash, 216);
-  await page.reload();
-  await page.getByRole('button', { name: '继续第 2 日的旅程' }).click();
-  assert.deepEqual(await save(), day2);
-  await page.getByRole('button', { name: '重新开始', exact: true }).click();
-  await page.getByRole('button', { name: '保留当前旅程', exact: true }).click();
-  assert.deepEqual(await save(), day2);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: output + '/mobile.png', fullPage: true });
-  assert(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-    'page horizontally overflows',
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const page = await browser.newPage({ viewport: { width: 1536, height: 864 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+const button = (name) => page.getByRole('button', { name, exact: true });
+const read = () =>
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v2')));
+const load = async (s) => {
+  await page.evaluate(
+    (s) => localStorage.setItem('bianliang-save-v2', JSON.stringify(s)),
+    s,
   );
-  // Finish a complete run through visible controls. Do not inject state or read hidden outcomes.
-  let n = 0;
-  let inspected=false;
-  while ((await save()).phase !== 'ended' && n++ < 180) {
-    const current = await save();
-    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'flow horizontally overflows');
-    if (current.event) {
-      if(!inspected){
-        await page.getByRole('button',{name:'向附近人查问',exact:false}).click();
-        const checked=await save();assert.equal(checked.cash,current.cash-5);assert(checked.event.inspected);
-        await page.reload();await page.getByRole('button',{name:`继续第 ${checked.day} 日的旅程`}).click();
-        assert.deepEqual(await save(),checked);await page.screenshot({path:output+'/encounter.png',fullPage:true});inspected=true;
-      }
-      await page
-        .getByRole('button', { name: '告辞离开', exact: false })
-        .click();
-      continue;
-    }
-    if (current.phase === 'last') {
-      await page.getByRole('button', { name: '留在北宋，结算此生' }).click();
-      continue;
-    }
-    if (current.phase === 'night') {
-      const hasBread = current.batches.some(
-        (b) => b.good === 'bread' && b.units >= 10,
-      );
-      await page
-        .getByRole('radio', {
-          name: hasBread ? '炊饼一个' : '食肆 · 18文 / 体力 +5',
-          exact: true,
-        })
-        .check();
-      await page
-        .getByRole('radio', {
-          name: current.rented
-            ? '租屋 · 免费 / 体力回满'
-            : '通铺 · 30文 / 体力回满',
-          exact: true,
-        })
-        .check();
-      await page
-        .getByRole('spinbutton', { name: '喂鸡数量' })
-        .fill(
-          String(
-            Math.min(
-              current.hens.length,
-              Math.floor(
-                current.batches
-                  .filter((b) => b.good === 'grain')
-                  .reduce((a, b) => a + b.units, 0) / 2,
-              ),
-            ),
-          ),
+  await page.reload();
+  await page.getByRole('button', { name: /继续第/ }).click();
+};
+const metrics = [];
+async function layout(label) {
+  await page.evaluate(() => scrollTo(0, 0));
+  const m = await page.evaluate(() => {
+    const bad = [...document.querySelectorAll('main *')]
+      .filter((e) => {
+        const r = e.getBoundingClientRect();
+        const c = getComputedStyle(e);
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          c.display !== 'none' &&
+          (e.scrollWidth > e.clientWidth + 2 ||
+            e.scrollHeight > e.clientHeight + 2) &&
+          !['PROGRESS', 'INPUT', 'SELECT'].includes(e.tagName)
         );
-      await page
-        .getByRole('button', { name: '安排妥当，度过这一夜 →' })
-        .click();
-      continue;
-    }
-    if (current.cash >= 3000) {
-      await page
-        .getByRole('button', { name: '支付3000文归航', exact: true })
-        .click();
-      continue;
-    }
-    if (!current.rented && current.cash >= 450) {
-      await page
-        .getByRole('button', { name: '租住小屋', exact: false })
-        .click();
-      continue;
-    }
-    const heavy = page.getByRole('button', { name: '码头重活', exact: false });
-    if (await heavy.isEnabled()) await heavy.click();
-    else
-      await page
-        .getByRole('button', { name: '坐下歇脚', exact: false })
-        .click();
+      })
+      .map((e) => ({
+        tag: e.tagName,
+        cls: e.className,
+        scroll: [e.scrollWidth, e.scrollHeight],
+        client: [e.clientWidth, e.clientHeight],
+      }));
+    return {
+      width: innerWidth,
+      height: innerHeight,
+      pageHeight: document.documentElement.scrollHeight,
+      pageWidth: document.documentElement.scrollWidth,
+      bad,
+    };
+  });
+  metrics.push({ label, ...m });
+  await page.screenshot({ path: `${output}/${label}.png` });
+  assert(
+    m.pageHeight <= m.height + 1 && m.pageWidth <= m.width + 1,
+    `${label} page overflow ${JSON.stringify(m)}`,
+  );
+  assert.equal(
+    m.bad.length,
+    0,
+    `${label} panel overflow ${JSON.stringify(m.bad)}`,
+  );
+}
+try {
+  await page.goto(process.env.GAME_URL ?? 'http://127.0.0.1:4173');
+  await button('走进汴梁 · 3000文').click();
+  const original = await read();
+  await page.reload();
+  await button('挑战三万文').click();
+  await page.getByRole('dialog').waitFor();
+  assert.deepEqual(await read(), original);
+  await button('保留当前旅程').click();
+  assert.deepEqual(await read(), original);
+  await button('挑战三万文').click();
+  await button('开始新局').click();
+  assert.equal((await read()).target, 30000);
+  const downloadPromise = page.waitForEvent('download');
+  await button('导出存档').click();
+  assert(
+    (await downloadPromise).suggestedFilename().includes('bianliang-save-v2'),
+  );
+  await button('情报').click();
+  await button('茶馆听消息 · 8文').click();
+  const tea = await read();
+  assert.equal(new Set(tea.intel.map((i) => i.semantic)).size, 3);
+  assert(!tea.intel.some((i) => i.text.includes(i.semantic)));
+  await button('追问出处').click();
+  assert((await read()).intel.some((i) => i.asked));
+  const developed = newGame(20260910, 30000);
+  developed.day = 100;
+  developed.cash = 25000;
+  developed.skills = { husbandry: 3, food: 3, textile: 3, brewing: 3 };
+  developed.skillXp = { husbandry: 99, food: 99, textile: 99, brewing: 99 };
+  developed.buffs = { tired: 101, cold: 101 };
+  developed.housing = {
+    id: 'mansion',
+    paidThrough: null,
+    maintenanceSuspended: false,
+  };
+  developed.equipment = EQUIPMENT_IDS.map((kind, i) => ({
+    id: 500 + i,
+    kind,
+    installed: true,
+    jobId: null,
+  }));
+  developed.intel = INFO_TEMPLATES.map((t, i) => ({
+    id: `test-${i}`,
+    templateId: t.id,
+    reportVersion: 2,
+    title: t.title,
+    semantic: t.semantic,
+    category: t.category,
+    source: t.source,
+    text: t.variants[0],
+    heardDay: 99,
+    usefulUntil: 110,
+    status: 'confirmed',
+    followUp: '你回访了原来的消息来源，已经核对过经营条件。',
+  }));
+  developed.logs = Array.from({ length: 80 }, (_, i) => ({
+    id: 1000 + i,
+    day: 90 + (i % 10),
+    text: '码头的伙计送来了货物，原料与成品的账目已经仔细核对。',
+    cash: -100,
+    items: '小麦＋20，粟米＋10',
+  }));
+  await load(original);
+  await button('资产').click();
+  assert.match(await page.locator('.operation-feedback').innerText(), /已打开资产/);
+  assert.match(await page.locator('.status-effects').innerText(), /前三日听消息时多一条交叉线索/);
+  assert.match(await page.locator('.detail').innerText(), /2份 \/ 0文/);
+  for (const category of ['在制品', '设备', '房产']) {
+    await button(category).click();
+    assert.match(await page.locator('.list-column').innerText(), new RegExp('暂无' + category));
+    await layout('资产空清单-' + category);
   }
-  const end = await save();
-  assert.equal(end.phase, 'ended');
-  assert.equal(end.ending, 'return');
-  assert(inspected);
-  assert.equal(errors.length, 0, errors.join('\n'));
-  await page.setViewportSize({ width: 1440, height: 1050 });
-  await page.screenshot({ path: output + '/ending.png', fullPage: true });
-  // Corrupt-save handling must preserve the original until explicit replacement.
+  await load(developed);
+  assert.match(await page.locator('.status-effects').innerText(), /劳动和生产体力成本/);
+  await button('下一个状态').click();
+  assert.match(await page.locator('.status-effects').innerText(), /夜间健康/);
+  await button('资产').click();
+  for (const category of ['设备', '房产']) {
+    await button(category).click();
+    assert.match(await page.locator('.detail').innerText(), /回收|维护/);
+    await layout('资产持有清单-' + category);
+  }
+  const inProgress = structuredClone(developed);
+  const vat = inProgress.equipment.find(e => e.kind === 'brewVat');
+  vat.jobId = 950;
+  inProgress.jobs = [{ id: 950, recipeId: 'wine', quantity: 2, equipmentId: vat.id,
+    startDay: 100, readyDay: 102, inputCost: 240, outputUnits: 80, status: 'queued' }];
+  await load(inProgress);
+  await button('资产').click();
+  await button('在制品').click();
+  assert.match(await page.locator('.detail').innerText(), /投入成本240文/);
+  assert.match(await page.locator('.detail').innerText(), /正常加工/);
+  await layout('资产在制品');
+  await load(original);
+  await button('人物').click();
+  await button('短工 · 25文').click();
+  assert.match(await page.locator('.operation-feedback').innerText(), /现金\+25文/);
+  await layout('顶部操作响应');
+  const states = [
+    ['初始', original],
+    ['满列表', developed],
+  ];
+  for (const [w, h] of [
+    [1536, 864],
+    [1920, 900],
+    [1920, 1080],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    for (const [name, s] of states) {
+      await load(s);
+      for (const tab of ['市场', '资产', '生产', '住宅', '人物', '情报', '账本']) {
+        await button(tab).click();
+        await layout(`${w}x${h}-${name}-${tab}`);
+      }
+      await button('生产').click();
+      await button('设备').click();
+      await layout(`${w}x${h}-${name}-设备`);
+    }
+    await load({ ...developed, phase: 'night' });
+    await layout(`${w}x${h}-夜间`);
+    await page.getByLabel('喂鸡数量').fill('99');
+    await layout(`${w}x${h}-夜间错误`);
+    const variants = EVENTS.flatMap((f) =>
+      f.variants.map((v) => ({ f, v })),
+    ).sort(
+      (a, b) =>
+        b.v.texts[0].length +
+        b.v.clue.length +
+        b.v.inspection.length -
+        (a.v.texts[0].length + a.v.clue.length + a.v.inspection.length),
+    );
+    const { f, v } = variants[0];
+    await load({
+      ...developed,
+      event: {
+        id: 999,
+        family: f.id,
+        variant: v.id,
+        person: v.person,
+        title: f.title,
+        text: v.texts[0],
+        clue: v.clue,
+        hiddenFact: v.fact,
+        inspection: v.inspection,
+        inspected: true,
+        choices: v.choices,
+      },
+    });
+    await layout(`${w}x${h}-最长遭遇`);
+    await load({ ...developed, phase: 'ended', ending: 'return' });
+    await layout(`${w}x${h}-结局`);
+    await load({ ...developed, cash: 30000 });
+    await layout(`${w}x${h}-归航可用`);
+    await button('价格记录').click();
+    await layout(`${w}x${h}-行情历史`);
+    await button('交易详情').click();
+    const last = page
+      .locator('.list-column')
+      .getByRole('button', { name: '下一页', exact: true });
+    while (await last.isEnabled()) await last.click();
+    await layout(`${w}x${h}-市场末页`);
+  }
+  // Visible-control transaction and fatigue confirmation.
+  await load(original);
+  await button('进入市场').click();
+  await page.getByLabel('粟米数量').fill('1.5');
+  await button('买入').click();
+  assert.equal((await read()).cash, original.cash - 32);
+  await page.reload();
+  await page.getByRole('button', { name: /继续第/ }).click();
+  assert.equal((await read()).phase, 'market');
+  await load({ ...original, stamina: 40 });
+  await button('人物').click();
+  await button('重活 · 40文').click();
+  await page.getByRole('dialog').waitFor();
+  assert.equal((await read()).stamina, 40);
+  await button('确认执行').click();
+  assert.equal((await read()).health, 98);
+  // Production with insufficient cash/materials gives visible reasons, not silent click failures.
+  await load({ ...developed, cash: 0, stamina: 0 });
+  await button('生产').click();
+  await layout('1536-invalid-production');
+  assert(await button('开工').isDisabled());
+  const legacy = structuredClone(original);
+  delete legacy.ledger.purchases;
+  await load(legacy);
+  await button('人物').click();
+  await button('休息 · 恢复25体力').click();
+  assert.deepEqual(
+    JSON.parse(
+      await page.evaluate(() =>
+        localStorage.getItem('bianliang-save-v2-before-20260910'),
+      ),
+    ),
+    legacy,
+  );
+  assert(await button('导出修复前备份').isVisible());
+  await layout('legacy-backup-header');
   await page.evaluate(() =>
-    localStorage.setItem('bianliang-save-v1', '{"broken":true}'),
+    localStorage.setItem('bianliang-save-v2', '{"broken":true}'),
   );
   await page.reload();
-  await page.getByRole('status').filter({ hasText: '存档损坏' }).waitFor();
+  await page.getByText(/存档损坏或版本不兼容/).waitFor();
+  await button('挑战三万文').click();
   assert.equal(
-    await page.evaluate(() => localStorage.getItem('bianliang-save-v1')),
+    await page.evaluate(() => localStorage.getItem('bianliang-save-v2')),
     '{"broken":true}',
   );
+  await button('保留当前旅程').click();
+  assert.equal(errors.length, 0, errors.join('\n'));
   writeFileSync(
-    output + '/result.json',
+    `${output}/result.json`,
     JSON.stringify(
       {
         passed: true,
-        completedDay: end.day,
-        ending: end.ending,
-        browserErrors: errors,
-        nativeWebMCP:await page.evaluate(()=>typeof document.modelContext?.registerTool==='function'),
-        checks: [
-          'opening',
-          'tea',
-          'market',
-          'night',
-          'save reload',
-          'restart cancel',
-          '390px viewport',
-          'full visible-control run',
-          'corrupt save',
-          'inspect encounter and reload',
-        ],
+        checks: metrics.length,
+        metrics,
+        errors,
+        scope:
+          'desktop only; 1536×864, 1920×900, 1920×1080; no mobile requirement',
       },
       null,
       2,
     ),
   );
-  console.log('Browser checks passed', end.day, end.ending);
+  console.log('Desktop browser checks passed', metrics.length);
+} catch (e) {
+  writeFileSync(
+    `${output}/failure.json`,
+    JSON.stringify({ error: String(e), metrics, errors }, null, 2),
+  );
+  throw e;
 } finally {
   await browser.close();
 }

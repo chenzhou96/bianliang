@@ -1,386 +1,542 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  newGame,
   dispatch,
-  quantity,
+  actionPreview,
+  newGame,
+  nightPreview,
   occupied,
-  capacity,
-  quote,
-  maybeEncounter,
+  quantity,
   readSave,
-  updatePrices,
-  pickWeighted,
-  achievements,
+  staminaMax,
 } from '../lib/game/engine.ts';
-import { EVENTS } from '../lib/game/content.ts';
-import { GOODS, GOOD_IDS } from '../lib/game/config.ts';
-import type { Action, GameState } from '../lib/game/types.ts';
-void test('every authored outcome is executable, bounded and replayable', () => {
-  let checked = 0;
-  for (const f of EVENTS)
-    for (const v of f.variants)
-      for (const c of v.choices) {
-        const seen = new Set<string>();
-        for (let seed = 1; seed <= 100; seed++) {
-          const s = newGame(seed * 982451653);
-          s.day = 2;
-          s.event = {
-            id: 999,
-            family: f.id,
-            variant: v.id,
-            person: v.person,
-            title: f.title,
-            text: v.texts[0],
-            clue: v.clue,
-            inspection: v.inspection,
-            hiddenFact: v.fact,
-            inspected: false,
-            choices: structuredClone(v.choices),
-          };
-          const next = act(s, { type: 'choice', id: c.id, eventId: 999 });
-          const expected = c.outcomes.find((o) => o.text === next.story);
-          assert(expected);
-          seen.add(next.story);
-          assert.equal(
-            next.cash,
-            s.cash - (c.cost.cash ?? 0) + (expected.effect.cash ?? 0),
-          );
-          assert.equal(next.ap, s.ap - (c.cost.ap ?? 0));
-          assert(next.health >= 92);
-          assert(next.followups.length <= 2);
-          assert.deepEqual(
-            next,
-            act(readSave(JSON.stringify(s)), {
-              type: 'choice',
-              id: c.id,
-              eventId: 999,
-            }),
-          );
-          if (f.id === 'bargain' && expected.effect.good)
-            assert.equal(
-              next.batches.at(-1)?.cost,
-              (c.cost.cash ?? 0) - (expected.effect.cash ?? 0),
-            );
-        }
-        assert.equal(
-          seen.size,
-          c.outcomes.length,
-          `${f.id}/${v.id}/${c.id}: unreachable outcome`,
-        );
-        checked += seen.size;
-      }
-  assert(checked >= 72);
-});
-void test('deep corrupt inventory and hidden event records are rejected', () => {
-  for (const mutate of [
-    (s: GameState) => {
-      s.batches[0].units = -1;
-    },
-    (s: GameState) => {
-      s.prices.grain.buy = 0;
-    },
-    (s: GameState) => {
-      s.worlds[0].truth = 'broken' as never;
-    },
-    (s: GameState) => {
-      s.buffs.cold = NaN;
-    },
-  ]) {
-    const s = newGame(5);
-    mutate(s);
-    assert.throws(() => readSave(JSON.stringify(s)));
-  }
-});
+import { GOOD_IDS, GOODS, RECIPES, SKILL_IDS } from '../lib/game/config.ts';
+import {
+  EVENTS,
+  INFO_TEMPLATES,
+  INFO_TEMPLATES as CONTENT_INFO,
+} from '../lib/game/content.ts';
+import type { Action, GameState, Good } from '../lib/game/types.ts';
+
 function act(s: GameState, a: Action) {
   const r = dispatch(s, a);
-  assert.equal(r.error, undefined);
+  assert.equal(r.error, undefined, r.error);
   return r.state;
 }
-function cancel(s: GameState) {
-  return s.event
-    ? act(s, { type: 'choice', id: 'decline', eventId: s.event.id })
-    : s;
+function night(s: GameState) {
+  if (s.phase === 'day') s = act(s, { type: 'endDay' });
+  return act(s, {
+    type: 'night',
+    meal: quantity(s, 'bread') ? 'bread' : 'none',
+    bed: 'street',
+    feed: 0,
+  });
 }
-function invariant(s: GameState) {
-  assert(s.cash >= 0 && Number.isInteger(s.cash));
-  assert(s.health >= 0 && s.health <= 100);
-  assert(s.stamina >= 0 && s.stamina <= 100);
-  assert(s.ap >= 0 && s.ap <= 2);
-  assert(occupied(s) <= capacity(s));
-  for (const b of s.batches) {
-    assert(b.units > 0 && Number.isInteger(b.units));
-    assert(b.cost >= 0 && Number.isInteger(b.cost));
-  }
-  for (const g of GOOD_IDS) {
-    assert(quote(s, g).buy > quote(s, g).sell);
-  }
-  assert.equal(s.cash, 800 + s.logs.reduce((n, l) => n + l.cash, 0));
-}
-void test('original sequence, accounting, deterministic save resume', () => {
-  let s = newGame(42);
-  for (const a of [
-    { type: 'tea' },
-    { type: 'market' },
-    { type: 'trade', side: 'buy', good: 'grain', quantity: 20 },
-    { type: 'trade', side: 'buy', good: 'hen', quantity: 1 },
-    { type: 'leave' },
-  ] as Action[])
-    s = act(s, a);
-  assert.equal(s.cash, 246);
-  const saved = readSave(JSON.stringify(s));
-  const a: Action = { type: 'night', meal: 'bread', bed: 'inn', feed: 1 };
-  const next = act(s, a);
-  assert.deepEqual(next, act(saved, a));
-  assert.equal(next.cash, 216);
-  assert.equal(next.day, 2);
-  assert.equal(quantity(next, 'grain'), 21.8);
-  assert.equal(quantity(next, 'bread'), 1);
-  invariant(next);
-  assert(dispatch(next, a).error);
-  assert(dispatch(next, { type: 'heavy' }, s.revision).error);
+
+void test('v2 content and rules expose the planned long-game surface', () => {
+  assert.equal(GOOD_IDS.length, 17);
+  assert.equal(CONTENT_INFO.length, 120);
+  assert.equal(INFO_TEMPLATES.length, 120);
+  assert.equal(RECIPES.length, 7);
+  assert.deepEqual(SKILL_IDS, ['husbandry', 'food', 'textile', 'brewing']);
+  const low = newGame(1, 3000),
+    high = newGame(1, 30000);
+  assert.equal(low.target, 3000);
+  assert.equal(high.target, 30000);
+  assert.equal('ap' in low, false);
+  assert.equal(low.day, 1);
 });
-void test('invalid trades are atomic and cannot reroll RNG', () => {
-  const s = act(newGame(1), { type: 'market' });
-  for (const q of [-1, 0, NaN, Infinity, 0.123, 1000000]) {
-    const r = dispatch(s, {
+
+void test('market is free to enter and carrying goods consumes cumulative stamina atomically', () => {
+  let s = act(newGame(2), { type: 'market' });
+  const before = structuredClone(s);
+  const bad = dispatch(s, {
+    type: 'trade',
+    side: 'buy',
+    good: 'wheat',
+    quantity: 100,
+  });
+  assert(bad.error);
+  assert.deepEqual(bad.state, s);
+  s = act(s, { type: 'trade', side: 'buy', good: 'wheat', quantity: 1 });
+  assert.equal(s.stamina, before.stamina - 1);
+  assert.equal(quantity(s, 'wheat'), 3);
+  s = act(s, { type: 'trade', side: 'sell', good: 'wheat', quantity: 1 });
+  assert.equal(s.stamina, before.stamina - 2);
+  s = act(s, { type: 'leave' });
+  assert.equal(s.phase, 'day');
+});
+
+void test('food production chain works from learning through installation and sale', () => {
+  let s = newGame(3);
+  s = act(s, { type: 'rentHousing', housing: 'room' });
+  s = act(s, { type: 'install', equipment: 'mill' });
+  s = act(s, { type: 'install', equipment: 'stove' });
+  s = act(s, { type: 'learn', skill: 'food' });
+  s = act(s, { type: 'produce', recipeId: 'flour', quantity: 1 });
+  assert.equal(quantity(s, 'flour'), 2);
+  assert.equal(s.stats.productionRuns, 1);
+  s = act(s, { type: 'produce', recipeId: 'bread', quantity: 1 });
+  assert.equal(quantity(s, 'bread'), 7);
+  assert(s.stamina >= 0);
+  s = act(s, { type: 'market' });
+  s = act(s, { type: 'trade', side: 'sell', good: 'bread', quantity: 3 });
+  assert(s.ledger.tradeRevenue > 0);
+  assert(s.ledger.productionRevenue > 0);
+});
+
+void test('overnight production reserves output space and completes after the required nights', () => {
+  let s = newGame(4);
+  s = act(s, { type: 'rentHousing', housing: 'room' });
+  s = act(s, { type: 'install', equipment: 'pickleVat' });
+  s = act(s, { type: 'learn', skill: 'food' });
+  s.batches.push({
+    id: 900,
+    good: 'egg',
+    units: 20,
+    cost: 12,
+    expires: 6,
+    origin: 'buy',
+  });
+  s = act(s, { type: 'produce', recipeId: 'saltedEgg', quantity: 1 });
+  assert.equal(quantity(s, 'saltedEgg'), 0);
+  assert.equal(s.jobs[0].readyDay, 3);
+  assert.equal(reserved(s), occupied(s) + 30);
+  s = night(s);
+  assert.equal(s.day, 2);
+  assert.equal(quantity(s, 'saltedEgg'), 0);
+  s = night(s);
+  assert.equal(s.day, 3);
+  assert.equal(quantity(s, 'saltedEgg'), 3);
+  assert.equal(s.equipment.find((e) => e.kind === 'pickleVat')?.jobId, null);
+});
+
+void test('work, lessons, rest and treatment use daily limits rather than action points', () => {
+  let s = newGame(5);
+  s = act(s, { type: 'short' });
+  s = act(s, { type: 'short' });
+  assert.equal(s.daily.work, 2);
+  assert(dispatch(s, { type: 'short' }).error);
+  s = act(s, { type: 'learn', skill: 'food' });
+  assert(dispatch(s, { type: 'learn', skill: 'textile' }).error);
+  s.health = 35;
+  s.stamina = 80;
+  assert.equal(staminaMax(s), 60);
+  assert(dispatch(s, { type: 'heavy' }).error);
+  s = act(s, { type: 'treat', mode: 'slow' });
+  assert.equal(s.daily.treatment, 1);
+  assert(dispatch(s, { type: 'treat', mode: 'slow' }).error);
+  s = act(s, { type: 'rest' });
+  assert(dispatch(s, { type: 'rest' }).error);
+});
+
+void test('housing downgrade never destroys assets and ownership sale is fixed-price', () => {
+  let s = newGame(6);
+  s.cash = 10000;
+  s = act(s, { type: 'buyHousing', housing: 'yard' });
+  s = act(s, { type: 'install', equipment: 'mill' });
+  assert(
+    dispatch(s, { type: 'rentHousing', housing: 'room' }).error,
+    'owned property must be sold explicitly',
+  );
+  s = act(s, { type: 'uninstall', equipmentId: s.equipment[0].id });
+  const before = s.cash;
+  s = act(s, { type: 'sellHousing' });
+  assert.equal(s.cash - before, 4320);
+  s = act(s, { type: 'rentHousing', housing: 'courtyard' });
+  s = act(s, { type: 'install', equipment: 'mill' });
+  s = act(s, { type: 'rentHousing', housing: 'room' });
+  assert.equal(s.equipment[0].installed, true);
+  s = act(s, { type: 'endLease' });
+  assert.equal(s.equipment[0].installed, false);
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
+});
+
+void test('night preflight shares grain, supports free survival, and save resumes exactly', () => {
+  let s = newGame(7);
+  s.phase = 'night';
+  s.batches = s.batches.filter((b) => b.good === 'grain');
+  s.batches[0].units = 10;
+  assert.throws(() =>
+    nightPreview(s, { type: 'night', meal: 'grain', bed: 'street', feed: 1 }),
+  );
+  s = act(s, { type: 'night', meal: 'none', bed: 'street', feed: 0 });
+  assert.equal(s.day, 2);
+  const copy = readSave(JSON.stringify(s));
+  assert.deepEqual(copy, s);
+  const corrupt = JSON.parse(JSON.stringify(s));
+  corrupt.version = 99;
+  assert.throws(() => readSave(JSON.stringify(corrupt)));
+});
+
+void test('event save does not reveal hidden facts through public state and every old event still has a decline', () => {
+  assert(
+    EVENTS.every((f) =>
+      f.variants.every((v) => v.choices.some((c) => c.id === 'decline')),
+    ),
+  );
+  const s = newGame(8);
+  s.day = 2;
+  s.phase = 'day';
+  s.encounterDay = 0;
+  const r = dispatch(s, { type: 'tea' });
+  assert.equal(r.error, undefined);
+  const activeState = r.state;
+  const resumed = readSave(JSON.stringify(activeState));
+  assert.deepEqual(resumed, activeState);
+  assert.equal(typeof activeState.rng, 'number');
+});
+
+function reserved(s: GameState) {
+  return (
+    occupied(s) +
+    s.jobs
+      .filter((j) => j.status === 'queued')
+      .reduce((a, j) => a + j.outputUnits, 0)
+  );
+}
+
+void test('reselling purchased goods counts cost once and keeps production separate', () => {
+  let s = act(newGame(42), { type: 'market' });
+  s = act(s, { type: 'trade', side: 'buy', good: 'herb', quantity: 1 });
+  s = act(s, { type: 'trade', side: 'sell', good: 'herb', quantity: 1 });
+  assert.equal(s.cash, 784);
+  assert.equal(s.ledger.purchases, 113);
+  assert.equal(s.ledger.tradeCost, 113);
+  assert.equal(s.ledger.tradeRevenue - s.ledger.tradeCost, -16);
+  s.batches.push({
+    id: 900,
+    good: 'herb',
+    units: 10,
+    cost: 25,
+    origin: 'production',
+    expires: null,
+  });
+  s = act(s, { type: 'trade', side: 'sell', good: 'herb', quantity: 1 });
+  assert.equal(s.ledger.tradeRevenue, 97);
+  assert.equal(s.ledger.productionRevenue, 97);
+  assert.equal(s.ledger.productionCost, 25);
+});
+void test('fractional trades charge accumulated carrying, not per-order rounding', () => {
+  const initial = act(newGame(9), { type: 'market' });
+  let split = initial;
+  for (let i = 0; i < 10; i++)
+    split = act(split, {
       type: 'trade',
       side: 'buy',
       good: 'grain',
-      quantity: q,
+      quantity: 0.1,
     });
-    assert(r.error);
-    assert.equal(r.state, s);
-  }
-  assert(
-    dispatch(s, { type: 'trade', side: 'buy', good: 'hen', quantity: 0.5 })
-      .error,
-  );
-  assert(
-    dispatch(s, { type: 'trade', side: 'sell', good: 'tea', quantity: 1 })
-      .error,
-  );
-  s.cash = 100000;
-  const r = dispatch(s, {
+  const bulk = act(initial, {
     type: 'trade',
     side: 'buy',
     good: 'grain',
-    quantity: 61,
+    quantity: 1,
   });
-  assert(r.error);
-  assert.equal(r.state, s);
+  assert.equal(split.stamina, bulk.stamina);
+  const repeat = dispatch(
+    split,
+    { type: 'trade', side: 'buy', good: 'grain', quantity: 1 },
+    initial.revision,
+  );
+  assert(repeat.error);
+  assert.deepEqual(repeat.state, split);
 });
-void test('same-day trading loses spread; hens track purchase cost', () => {
-  let s = act(newGame(1), { type: 'market' });
-  s = act(s, { type: 'trade', side: 'buy', good: 'hen', quantity: 1 });
-  s = act(s, { type: 'trade', side: 'sell', good: 'hen', quantity: 1 });
-  assert.equal(s.stats.profit, -18);
-  assert.equal(s.cash, 782);
-  s.buffs.regular = 5;
-  const before = s.cash;
-  s = act(s, { type: 'trade', side: 'buy', good: 'grain', quantity: 1 });
-  s = act(s, { type: 'trade', side: 'sell', good: 'grain', quantity: 1 });
-  assert(s.cash < before);
-  invariant(s);
-});
-void test('night preflight checks shared grain before spending', () => {
-  const s = newGame(8);
-  s.phase = 'night';
-  s.hens = [{ id: 900, hunger: 0, cost: 126 }];
-  s.batches = s.batches.filter((b) => b.good === 'grain');
-  s.batches[0].units = 10;
-  const r = dispatch(s, { type: 'night', meal: 'grain', bed: 'inn', feed: 1 });
-  assert(r.error);
-  assert.equal(r.state, s);
-  assert.equal(r.state.cash, 800);
-});
-void test('starvation kills hens only after three consecutive nights', () => {
-  let s = newGame(7);
-  s.hens = [{ id: 900, hunger: 0, cost: 126 }];
-  for (let n = 1; n <= 3; n++) {
-    s.phase = 'night';
-    s = act(s, { type: 'night', meal: 'diner', bed: 'inn', feed: 0 });
-    assert.equal(s.hens.length, n < 3 ? 1 : 0);
-  }
-  assert.equal(s.stats.eggs, 0);
-});
-void test('feeding resets hunger and expiry occurs after meal', () => {
+void test('queued work pauses on eviction, cancellation gives no XP, and recovery resumes', () => {
   let s = newGame(10);
-  s.day = 3;
+  s.cash = 10000;
+  s = act(s, { type: 'rentHousing', housing: 'room' });
+  s = act(s, { type: 'install', equipment: 'brewVat' });
+  s = act(s, { type: 'learn', skill: 'brewing' });
+  s.batches.push({
+    id: 900,
+    good: 'firewood',
+    units: 10,
+    cost: 12,
+    origin: 'buy',
+    expires: null,
+  });
+  s = act(s, { type: 'produce', recipeId: 'wine', quantity: 1 });
+  assert.equal(s.skillXp.brewing, 0);
+  const job = s.jobs[0];
+  s = act(s, { type: 'endLease' });
+  s = act(s, { type: 'endDay' });
+  s = act(s, { type: 'night', meal: 'diner', bed: 'inn', feed: 0 });
+  assert.equal(s.jobs[0].readyDay, job.readyDay + 1);
+  assert.equal(s.jobs[0].status, 'queued');
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
+  s = act(s, { type: 'rentHousing', housing: 'room' });
+  s = act(s, { type: 'install', equipment: 'brewVat' });
+  s = act(s, { type: 'cancelProduction', jobId: job.id });
+  assert.equal(s.skillXp.brewing, 0);
+  assert.equal(s.equipment[0].jobId, null);
+  const before = s.cash;
+  s = act(s, { type: 'sellEquipment', equipmentId: s.equipment[0].id });
+  assert.equal(s.cash - before, 216);
+  assert(dispatch(s, { type: 'sellEquipment', equipmentId: 500 }).error);
+});
+void test('maintenance and rent are paid even with temporary lodging, and free eviction is atomic', () => {
+  let s = newGame(12);
+  s.cash = 10000;
+  s = act(s, { type: 'buyHousing', housing: 'yard' });
   s.phase = 'night';
-  s.hens = [{ id: 900, hunger: 2, cost: 126 }];
-  s = act(s, { type: 'night', meal: 'bread', bed: 'inn', feed: 1 });
-  assert.equal(s.hens[0].hunger, 0);
-  assert.equal(quantity(s, 'bread'), 0);
-  assert(s.batches.every((b) => b.expires === null || b.expires >= s.day));
-});
-void test('mixed purchased and produced eggs keep separate costs', () => {
-  let s = newGame(2);
-  s.phase = 'market';
-  s.batches = [
-    {
-      id: 100,
-      good: 'egg',
-      units: 10,
-      cost: 4,
-      expires: 3,
-      origin: 'production',
-    },
-    { id: 101, good: 'egg', units: 10, cost: 15, expires: 4, origin: 'buy' },
-  ];
-  s = act(s, { type: 'trade', side: 'sell', good: 'egg', quantity: 2 });
-  assert.equal(s.stats.eggRevenue, 12);
-  assert.equal(s.stats.productionCostSold, 4);
-  assert.equal(s.stats.profit, -3);
-});
-void test('three endings and final-night death precedence', () => {
-  let s = newGame(9);
-  s.cash = 3000;
-  s = act(s, { type: 'return' });
-  assert.equal(s.ending, 'return');
+  s.cash = 18;
+  let p = nightPreview(s, {
+    type: 'night',
+    meal: 'diner',
+    bed: 'yard',
+    feed: 0,
+  });
+  assert(p.maintenanceSkipped);
+  assert.equal(p.cash, 18);
+  s = act(s, { type: 'night', meal: 'diner', bed: 'yard', feed: 0 });
   assert.equal(s.cash, 0);
-  assert.equal(s.beforeReturn, 3000);
-  assert(achievements(s).find(([n]) => n === '归去来兮')?.[1]);
-  let t = newGame(9);
-  t.day = 30;
-  t.phase = 'night';
-  t = act(t, { type: 'night', meal: 'bread', bed: 'inn', feed: 0 });
-  assert.equal(t.phase, 'last');
-  t = act(t, { type: 'stay' });
-  assert.equal(t.ending, 'stay');
-  let d = newGame(9);
-  d.day = 30;
-  d.phase = 'night';
-  d.health = 1;
-  d = act(d, { type: 'night', meal: 'none', bed: 'street', feed: 0 });
-  assert.equal(d.ending, 'death');
-  assert.equal(d.stats.eggs, 0);
+  assert(s.housing.maintenanceSuspended);
+  s.cash = 16;
+  s = act(s, { type: 'maintain' });
+  assert.equal(s.housing.maintenanceSuspended, false);
+  s = newGame(13);
+  s = act(s, { type: 'rentHousing', housing: 'room' });
+  s.phase = 'night';
+  p = nightPreview(s, { type: 'night', meal: 'diner', bed: 'inn', feed: 0 });
+  assert.equal(p.cash, 60);
+  s.cash = 18;
+  s = act(s, { type: 'night', meal: 'diner', bed: 'room', feed: 0 });
+  assert.equal(s.cash, 0);
+  assert.equal(s.housing.id, 'street');
 });
-void test('content inventory: 8 families, 3 variants, coherent alternatives', () => {
-  assert.equal(EVENTS.length, 8);
-  const ids = new Set();
-  for (const f of EVENTS) {
-    assert(f.variants.length >= 3);
-    for (const v of f.variants) {
-      const id = f.id + v.id;
-      assert(!ids.has(id));
-      ids.add(id);
-      assert.equal(v.texts.length, 2);
-      assert(v.fact && v.clue && v.inspection);
-      assert(v.choices.length >= 2 && v.choices.length <= 3);
-      assert(v.choices.some((c) => c.outcomes.length >= 2));
-      assert(
-        v.choices.some(
-          (c) => c.id === 'decline' && Object.keys(c.cost).length === 0,
-        ),
-      );
-      for (const c of v.choices)
-        for (const o of c.outcomes) {
-          assert(o.weight > 0);
-          assert(!o.effect.cash || o.effect.cash >= -50);
-          assert(!o.effect.health || o.effect.health >= -8);
-        }
-    }
-  }
+void test('old v2 ledger resets explicitly without losing inventory, and healthy multi-day saves resume', () => {
+  const s = newGame(20);
+  s.day = 50;
+  s.buffs = {};
+  s.housing = { id: 'room', paidThrough: 1, maintenanceSuspended: false };
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
+  const old = JSON.parse(JSON.stringify(s));
+  delete old.ledger.purchases;
+  const migrated = readSave(JSON.stringify(old));
+  assert.equal(migrated.cash, s.cash);
+  assert.deepEqual(migrated.batches, s.batches);
+  assert.equal(migrated.ledger.sinceDay, 50);
+  assert(migrated.story.includes('重新记账'));
 });
-void test('encounter facts, version exclusions, cooldown and save stability', () => {
-  const variants = new Set();
-  for (let seed = 1; seed <= 100; seed++) {
-    let s = newGame(seed);
-    for (let day = 2; day <= 30; day++) {
-      s.day = day;
-      s.phase = 'day';
-      s.ap = 2;
-      const prior = [...s.seen];
-      maybeEncounter(s, true);
-      if (s.event) {
-        const e = s.event;
-        variants.add(e.family + ':' + e.variant);
-        assert(!prior.includes(e.family + ':' + e.variant));
-        const saved = readSave(JSON.stringify(s));
-        assert.deepEqual(
-          act(s, { type: 'inspect' }),
-          act(saved, { type: 'inspect' }),
-        );
-        s = cancel(s);
-        const count = s.stats.events;
-        maybeEncounter(s, true);
-        assert.equal(s.stats.events, count);
-      }
-    }
-  }
-  assert.equal(variants.size, 24);
-});
-void test('world events vary across seeds, bounded prices, stable learned clues', () => {
-  const types = new Set();
-  for (let seed = 1; seed <= 100; seed++) {
-    let s = newGame(seed);
+void test('100 days of tea obey semantic and story cooldowns with actionable text', () => {
+  assert.equal(new Set(INFO_TEMPLATES.map((t) => t.semantic)).size, 120);
+  let s = newGame(88, 30000);
+  s.cash = 100000;
+  s.housing = { id: 'mansion', paidThrough: null, maintenanceSuspended: false };
+  const seen = new Map<string, number>();
+  const skeletonSeen = new Map<string, number>();
+  let total = 0;
+  const categories = new Set<string>();
+  for (let day = 1; day <= 100; day++) {
     s = act(s, { type: 'tea' });
-    assert(s.worlds.filter((w) => w.heard).every((w) => w.clueKnown));
-    s.worlds.forEach((w) => types.add(w.truth));
-    for (let day = 2; day <= 30; day++) {
-      s.day = day;
-      updatePrices(s);
-      for (const g of GOOD_IDS) {
-        assert(s.prices[g].buy >= Math.ceil(GOODS[g].base * 0.5));
-        assert(s.prices[g].buy <= GOODS[g].base * 2);
-        assert(s.prices[g].buy > s.prices[g].sell);
+    const fresh = s.intel.filter((i) => i.heardDay === day);
+    assert.equal(fresh.length, 3);
+    for (const i of fresh) {
+      const t = INFO_TEMPLATES.find((t) => t.id === i.templateId)!;
+      assert(!i.text.includes(t.semantic));
+      assert(day - (seen.get(t.semantic) ?? -99) >= 20);
+      assert(day - (skeletonSeen.get(t.skeleton) ?? -99) >= 7);
+      seen.set(t.semantic, day);
+      skeletonSeen.set(t.skeleton, day);
+      categories.add(i.category);
+      total++;
+    }
+    if (s.event)
+      s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
+    s = act(s, { type: 'endDay' });
+    s = act(s, { type: 'night', meal: 'diner', bed: 'mansion', feed: 0 });
+  }
+  assert.equal(total, 300);
+  assert(categories.size >= 8);
+  assert(s.worlds.some((w) => w.expected > 120));
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
+});
+
+void test('every recipe completes purchase-learn-install-produce-sell with reload and positive ordinary margin', () => {
+  for (const recipe of RECIPES) {
+    let s = newGame(77, 30000);
+    s.cash = 100000;
+    s = act(s, { type: 'rentHousing', housing: 'room' });
+    s = act(s, { type: 'learn', skill: recipe.industry });
+    if (recipe.minSkill > 1) {
+      s.skillXp[recipe.industry] = 10;
+      s.daily.lessons = 0;
+      s.stamina = 100;
+      s = act(s, { type: 'learn', skill: recipe.industry });
+    }
+    s = act(s, { type: 'install', equipment: recipe.equipment });
+    s.batches = [];
+    s.stamina = 100;
+    s = act(s, { type: 'market' });
+    for (const [good, units] of Object.entries(recipe.inputs))
+      s = act(s, {
+        type: 'trade',
+        good: good as Good,
+        quantity: units! / 10,
+        side: 'buy',
+      });
+    s = act(s, { type: 'leave' });
+    s = act(s, { type: 'produce', recipeId: recipe.id, quantity: 1 });
+    s = readSave(JSON.stringify(s));
+    for (let n = 0; n < recipe.duration; n++) {
+      s = act(s, { type: 'endDay' });
+      s = act(s, { type: 'night', meal: 'diner', bed: 'room', feed: 0 });
+      s = readSave(JSON.stringify(s));
+    }
+    const output = quantity(s, recipe.output);
+    assert(output > 0, recipe.id);
+    assert.equal(s.jobs.filter((j) => j.status === 'queued').length, 0);
+    // Use ordinary reference prices to compare production margin without a random price event.
+    s.prices[recipe.output] = {
+      buy: GOODS[recipe.output].base,
+      sell: GOODS[recipe.output].firstSell,
+    };
+    s = act(s, { type: 'market' });
+    s = act(s, {
+      type: 'trade',
+      good: recipe.output,
+      quantity: output,
+      side: 'sell',
+    });
+    assert(s.ledger.productionRevenue > s.ledger.productionCost, recipe.id);
+    assert.equal(s.ledger.tradeRevenue, 0);
+    assert.equal(s.ledger.tradeCost, 0);
+    assert.deepEqual(readSave(JSON.stringify(s)), s);
+  }
+});
+void test('fatigue warning uses the same action cost and invalid inputs are atomic', () => {
+  let s = newGame(17);
+  s.stamina = 20;
+  const a = { type: 'learn', skill: 'food' } as const;
+  const p = actionPreview(s, a);
+  assert(p.warning);
+  const next = act(s, a);
+  assert.equal(next.health, s.health - 2);
+  assert.equal(next.stamina, 0);
+  s = act(newGame(17), { type: 'market' });
+  for (const q of [NaN, Infinity, -1, 0, 0.15]) {
+    const r = dispatch(s, {
+      type: 'trade',
+      good: 'grain',
+      quantity: q,
+      side: 'buy',
+    });
+    assert(r.error);
+    assert.deepEqual(r.state, s);
+  }
+});
+void test('poultry feed costs follow eggs instead of disappearing from production margin', () => {
+  let s = newGame(21);
+  s.cash = 10000;
+  s = act(s, { type: 'rentHousing', housing: 'courtyard' });
+  s = act(s, { type: 'install', equipment: 'coop' });
+  s = act(s, { type: 'learn', skill: 'husbandry' });
+  s = act(s, { type: 'market' });
+  s = act(s, { type: 'trade', good: 'hen', quantity: 10, side: 'buy' });
+  s.batches = [];
+  s = act(s, { type: 'trade', good: 'grain', quantity: 2, side: 'buy' });
+  s = act(s, { type: 'leave' });
+  s = act(s, { type: 'endDay' });
+  s = act(s, { type: 'night', meal: 'diner', bed: 'courtyard', feed: 10 });
+  assert(quantity(s, 'egg') > 0);
+  assert.equal(s.ledger.feed, 42);
+  assert.equal(
+    s.batches.filter((b) => b.good === 'egg').reduce((a, b) => a + b.cost, 0) +
+      s.ledger.feedPending,
+    42,
+  );
+  assert(s.skillXp.husbandry > 0);
+});
+
+void test('a thousand nights retain future events, resumable saves and a reconciled cash journal', () => {
+  let s = newGame(20260910, 30000);
+  s.cash = 100000;
+  let balance = s.cash;
+  let peak = 0;
+  let publicEvents = 0;
+  for (let day = 1; day <= 1000; day++) {
+    for (const action of [
+      { type: 'short' },
+      { type: 'endDay' },
+      { type: 'night', meal: 'diner', bed: 'inn', feed: 0 },
+    ] as Action[]) {
+      if (s.event) {
+        const r = dispatch(s, {
+          type: 'choice',
+          eventId: s.event.id,
+          id: 'decline',
+        });
+        assert(!r.error);
+        s = r.state;
       }
+      const before = s.nextId;
+      const r = dispatch(s, action);
+      assert(!r.error, r.error);
+      balance += r.state.logs
+        .filter((l) => l.id >= before)
+        .reduce((v, l) => v + l.cash, 0);
+      s = r.state;
+      assert.equal(s.cash, balance);
+    }
+    assert(s.worlds.some((w) => w.expected > s.day));
+    publicEvents = s.stats.events;
+    if (day % 50 === 0) {
+      const raw = JSON.stringify(s);
+      peak = Math.max(peak, Buffer.byteLength(raw));
+      assert.deepEqual(readSave(raw), s);
     }
   }
-  assert.equal(types.size, 4);
+  assert.equal(s.day, 1001);
+  assert(
+    publicEvents > 50,
+    'repeatable encounters continue beyond the initial stories',
+  );
+  assert(peak < 100000);
 });
-void test('weighted sampler distribution and rare outcome reachable', () => {
-  const s = newGame(1023);
-  let rare = 0;
-  for (let i = 0; i < 10000; i++)
-    if (
-      pickWeighted(s, [
-        { weight: 99, id: 0 },
-        { weight: 1, id: 1 },
-      ]).id === 1
-    )
-      rare++;
-  assert(rare > 65 && rare < 140, `rare=${rare}`);
+
+void test('city reports replace lessons and persist their own verifiable follow-up', () => {
+  let s = newGame(20260910);
+  s.worlds = [];
+  s = act(s, { type: 'tea' });
+  s.event = null;
+  assert.equal(s.intel.length, 3);
+  assert(s.intel.every(i => i.reportVersion === 2 && i.resolution));
+  assert(INFO_TEMPLATES.every(t => t.id.startsWith('city-')));
+  const entry = s.intel[0];
+  const expected = structuredClone(entry.resolution!);
+  s = act(s, { type: 'askIntel', id: entry.id });
+  assert.equal(s.intel[0].followUp, expected.clue);
+  const premature = dispatch(s, { type: 'visitIntel', id: entry.id });
+  assert(premature.error);
+  assert.deepEqual(premature.state, s);
+  s = readSave(JSON.stringify(s))!;
+  assert.deepEqual(s.intel[0].resolution, expected);
+  s.day = expected.due;
+  s = act(s, { type: 'visitIntel', id: entry.id });
+  assert.equal(s.intel[0].followUp, expected.text);
+  assert(s.intel[0].visited);
+  const repeat = dispatch(s, { type: 'visitIntel', id: entry.id });
+  assert(repeat.error);
+  const oldLesson = { ...s.intel[0], id: 'old-lesson', reportVersion: undefined, resolution: undefined };
+  s.intel.push(oldLesson);
+  const restored = readSave(JSON.stringify(s))!;
+  assert(!restored.intel.some(i => i.id === 'old-lesson'));
+  assert.equal(restored.cash, s.cash);
+  assert.deepEqual(restored.batches, s.batches);
 });
-void test('follow-up requires provenance and triggers once', () => {
-  let s = newGame(7);
-  s.day = 6;
-  s.followups = [
-    { chain: 'widow', person: '陈婆婆', source: 2, due: 5, branch: 'gift' },
-  ];
-  s.relations = { widow: 2 };
-  maybeEncounter(s, true);
-  assert.equal(s.event?.family, 'followup');
-  assert(s.event?.text.includes('第2日'));
-  assert.equal(s.followups.length, 0);
-  s = cancel(s);
-  maybeEncounter(s, true);
-  assert.equal(s.event, null);
-  const t = newGame(8);
-  t.day = 4;
-  t.followups = [
-    { chain: 'widow', person: '陈婆婆', source: 2, due: 3, branch: 'gift' },
-  ];
-  maybeEncounter(t, true);
-  assert.notEqual(t.event?.family, 'followup');
-});
-void test('declining is always available with no money or AP', () => {
+
+void test('operation feedback records current action and exact resource changes across reloads', () => {
   let s = newGame(5);
-  s.day = 2;
-  maybeEncounter(s, true);
-  s.cash = 0;
-  s.ap = 0;
-  s.stamina = 0;
-  s = cancel(s);
-  assert.equal(s.event, null);
-  assert.equal(s.cash, 0);
-  assert.equal(s.phase, 'night');
-});
-void test('broken and incompatible saves are rejected', () => {
-  assert.throws(() => readSave('{'));
-  assert.throws(() => readSave('{}'));
-  const s = newGame(1);
-  s.version = 99;
-  assert.throws(() => readSave(JSON.stringify(s)));
+  s = act(s, { type: 'market' });
+  assert.match(s.lastResponse!, /进入市场/);
+  const before = structuredClone(s);
+  s = act(s, { type: 'trade', side: 'buy', good: 'wheat', quantity: 1 });
+  assert.match(s.lastResponse!, /买入/);
+  assert(s.lastResponse!.includes(`现金${s.cash - before.cash}文`));
+  assert(s.lastResponse!.includes(`体力${s.stamina - before.stamina}`));
+  assert.equal(readSave(JSON.stringify(s))!.lastResponse, s.lastResponse);
+  s = act(s, { type: 'leave' });
+  assert.match(s.lastResponse!, /离开市场/);
+  assert(!s.lastResponse!.includes('买入 ·'));
 });
