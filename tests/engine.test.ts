@@ -501,8 +501,8 @@ void test('city reports replace lessons and persist their own verifiable follow-
   s = act(s, { type: 'tea' });
   s.event = null;
   assert.equal(s.intel.length, 3);
-  assert(s.intel.every(i => i.reportVersion === 2 && i.resolution));
-  assert(INFO_TEMPLATES.every(t => t.id.startsWith('city-')));
+  assert(s.intel.every((i) => i.reportVersion === 2 && i.resolution));
+  assert(INFO_TEMPLATES.every((t) => t.id.startsWith('city-')));
   const entry = s.intel[0];
   const expected = structuredClone(entry.resolution!);
   s = act(s, { type: 'askIntel', id: entry.id });
@@ -518,10 +518,15 @@ void test('city reports replace lessons and persist their own verifiable follow-
   assert(s.intel[0].visited);
   const repeat = dispatch(s, { type: 'visitIntel', id: entry.id });
   assert(repeat.error);
-  const oldLesson = { ...s.intel[0], id: 'old-lesson', reportVersion: undefined, resolution: undefined };
+  const oldLesson = {
+    ...s.intel[0],
+    id: 'old-lesson',
+    reportVersion: undefined,
+    resolution: undefined,
+  };
   s.intel.push(oldLesson);
   const restored = readSave(JSON.stringify(s))!;
-  assert(!restored.intel.some(i => i.id === 'old-lesson'));
+  assert(!restored.intel.some((i) => i.id === 'old-lesson'));
   assert.equal(restored.cash, s.cash);
   assert.deepEqual(restored.batches, s.batches);
 });
@@ -529,14 +534,14 @@ void test('city reports replace lessons and persist their own verifiable follow-
 void test('operation feedback records current action and exact resource changes across reloads', () => {
   let s = newGame(5);
   s = act(s, { type: 'market' });
-  assert.match(s.lastResponse!, /进入市场/);
+  assert.equal(s.lastResponse, undefined, '导航不生成经营结果');
   const before = structuredClone(s);
   s = act(s, { type: 'trade', side: 'buy', good: 'wheat', quantity: 1 });
   assert.match(s.lastResponse!, /买入/);
   assert(s.lastResponse!.includes(`现金${s.cash - before.cash}文`));
   assert(s.lastResponse!.includes(`体力${s.stamina - before.stamina}`));
   assert.equal(readSave(JSON.stringify(s))!.lastResponse, s.lastResponse);
+  const response = s.lastResponse;
   s = act(s, { type: 'leave' });
-  assert.match(s.lastResponse!, /离开市场/);
-  assert(!s.lastResponse!.includes('买入 ·'));
+  assert.equal(s.lastResponse, response, '离开市场保留上次经营结果');
 });

@@ -1,9 +1,10 @@
+import { measureLayout } from './layout-check.mjs';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { newGame } from '../lib/game/engine.ts';
+import { newGame, dispatch } from '../lib/game/engine.ts';
 import { EVENTS, INFO_TEMPLATES } from '../lib/game/content.ts';
-import { EQUIPMENT_IDS } from '../lib/game/config.ts';
+import { EQUIPMENT_IDS, GOOD_IDS, BUFFS } from '../lib/game/config.ts';
 const output = 'tests/browser-output';
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -14,45 +15,30 @@ const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
   page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v2')));
 const load = async (s) => {
-  await page.evaluate(
-    (s) => localStorage.setItem('bianliang-save-v2', JSON.stringify(s)),
-    s,
-  );
+  await page.evaluate((s) => {
+    for (const key of Object.keys(localStorage))
+      if (key.startsWith('bianliang-ui:')) localStorage.removeItem(key);
+    localStorage.setItem('bianliang-save-v2', JSON.stringify(s));
+  }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
 };
 const metrics = [];
 async function layout(label) {
   await page.evaluate(() => scrollTo(0, 0));
-  const m = await page.evaluate(() => {
-    const bad = [...document.querySelectorAll('main *')]
-      .filter((e) => {
-        const r = e.getBoundingClientRect();
-        const c = getComputedStyle(e);
-        return (
-          r.width > 0 &&
-          r.height > 0 &&
-          c.display !== 'none' &&
-          (e.scrollWidth > e.clientWidth + 2 ||
-            e.scrollHeight > e.clientHeight + 2) &&
-          !['PROGRESS', 'INPUT', 'SELECT'].includes(e.tagName)
-        );
-      })
-      .map((e) => ({
-        tag: e.tagName,
-        cls: e.className,
-        scroll: [e.scrollWidth, e.scrollHeight],
-        client: [e.clientWidth, e.clientHeight],
-      }));
-    return {
-      width: innerWidth,
-      height: innerHeight,
-      pageHeight: document.documentElement.scrollHeight,
-      pageWidth: document.documentElement.scrollWidth,
-      bad,
-    };
-  });
+  const m = await measureLayout(page);
   metrics.push({ label, ...m });
+  assert(
+    m.assets.every((a) => a.bottom <= m.assetBottom + 1),
+    `${label}: assets overlap their summary`,
+  );
+  assert.equal(
+    await page
+      .getByRole('button', { name: /^(上一页|下一页|进入市场|离开市场)$/ })
+      .count(),
+    0,
+  );
+
   await page.screenshot({ path: `${output}/${label}.png` });
   assert(
     m.pageHeight <= m.height + 1 && m.pageWidth <= m.width + 1,
@@ -87,14 +73,20 @@ try {
   const tea = await read();
   assert.equal(new Set(tea.intel.map((i) => i.semantic)).size, 3);
   assert(!tea.intel.some((i) => i.text.includes(i.semantic)));
+  assert(await button('回访核对').isDisabled());
+  assert.doesNotMatch(
+    await page.locator('.detail').innerText(),
+    /核对结果：|追问所得：/,
+  );
   await button('追问出处').click();
   assert((await read()).intel.some((i) => i.asked));
+  assert.match(await page.locator('.detail').innerText(), /追问所得：/);
   const developed = newGame(20260910, 30000);
   developed.day = 100;
   developed.cash = 25000;
   developed.skills = { husbandry: 3, food: 3, textile: 3, brewing: 3 };
   developed.skillXp = { husbandry: 99, food: 99, textile: 99, brewing: 99 };
-  developed.buffs = { tired: 101, cold: 101 };
+  developed.buffs = Object.fromEntries(Object.keys(BUFFS).map((k) => [k, 101]));
   developed.housing = {
     id: 'mansion',
     paidThrough: null,
@@ -106,6 +98,38 @@ try {
     installed: true,
     jobId: null,
   }));
+  developed.hens = [{ id: 799, hunger: 0, cost: 100 }];
+  developed.batches = GOOD_IDS.filter((g) => g !== 'hen').map((good, i) => ({
+    id: 800 + i,
+    good,
+    units: 100,
+    cost: 100,
+    expires: null,
+    origin: 'buy',
+  }));
+  const sample = dispatch(newGame(1), { type: 'short' }).result;
+  developed.operationHistory = Array.from({ length: 50 }, (_, i) => ({
+    ...structuredClone(sample),
+    id: 900 + i,
+    day: i + 1,
+    details: [`完整记录条目${i + 1}，货物与现金已经核对。`],
+    items: GOOD_IDS.map((good) => ({ good, quantity: 1 })),
+  }));
+  developed.jobs = ['saltedEgg', 'wine'].map((recipeId, i) => ({
+    id: 950 + i,
+    recipeId,
+    quantity: 20,
+    equipmentId: developed.equipment.find(
+      (e) => e.kind === (i ? 'brewVat' : 'pickleVat'),
+    ).id,
+    startDay: 99,
+    readyDay: 102 + i,
+    inputCost: 300,
+    outputUnits: 800,
+    status: 'queued',
+  }));
+  for (const j of developed.jobs)
+    developed.equipment.find((e) => e.id === j.equipmentId).jobId = j.id;
   developed.intel = INFO_TEMPLATES.map((t, i) => ({
     id: `test-${i}`,
     templateId: t.id,
@@ -129,18 +153,39 @@ try {
   }));
   await load(original);
   await button('资产').click();
-  assert.match(await page.locator('.operation-feedback').innerText(), /已打开资产/);
-  assert.match(await page.locator('.status-effects').innerText(), /前三日听消息时多一条交叉线索/);
+  assert.doesNotMatch(
+    await page.locator('.record-feed').innerText(),
+    /已打开资产/,
+  );
+  assert.match(await page.locator('.status-effects').innerText(), /异乡人/);
   assert.match(await page.locator('.detail').innerText(), /2份 \/ 0文/);
   for (const category of ['在制品', '设备', '房产']) {
     await button(category).click();
-    assert.match(await page.locator('.list-column').innerText(), new RegExp('暂无' + category));
+    assert.match(
+      await page.locator('.list-column').innerText(),
+      new RegExp('暂无' + category),
+    );
     await layout('资产空清单-' + category);
   }
   await load(developed);
-  assert.match(await page.locator('.status-effects').innerText(), /劳动和生产体力成本/);
-  await button('下一个状态').click();
-  assert.match(await page.locator('.status-effects').innerText(), /夜间健康/);
+  assert.equal(await page.locator('.stock-cells > div').count(), 17);
+  assert.equal(await page.locator('.record-feed article').count(), 50);
+  await page.locator('.record-feed').focus();
+  await page.keyboard.press('End');
+  await page.waitForFunction(
+    () => document.querySelector('.record-feed').scrollTop > 0,
+  );
+  assert.match(
+    await page.locator('.record-feed').innerText(),
+    /完整记录条目1，/,
+  );
+  assert.match(await page.locator('.status-effects').innerText(), /风寒/);
+  await button('风寒').focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await page.getByRole('tooltip').waitFor();
+  assert.match(await page.getByRole('tooltip').innerText(), /健康/);
+  await page.keyboard.press('Escape');
   await button('资产').click();
   for (const category of ['设备', '房产']) {
     await button(category).click();
@@ -148,10 +193,21 @@ try {
     await layout('资产持有清单-' + category);
   }
   const inProgress = structuredClone(developed);
-  const vat = inProgress.equipment.find(e => e.kind === 'brewVat');
+  const vat = inProgress.equipment.find((e) => e.kind === 'brewVat');
   vat.jobId = 950;
-  inProgress.jobs = [{ id: 950, recipeId: 'wine', quantity: 2, equipmentId: vat.id,
-    startDay: 100, readyDay: 102, inputCost: 240, outputUnits: 80, status: 'queued' }];
+  inProgress.jobs = [
+    {
+      id: 950,
+      recipeId: 'wine',
+      quantity: 2,
+      equipmentId: vat.id,
+      startDay: 100,
+      readyDay: 102,
+      inputCost: 240,
+      outputUnits: 80,
+      status: 'queued',
+    },
+  ];
   await load(inProgress);
   await button('资产').click();
   await button('在制品').click();
@@ -161,7 +217,7 @@ try {
   await load(original);
   await button('人物').click();
   await button('短工 · 25文').click();
-  assert.match(await page.locator('.operation-feedback').innerText(), /现金\+25文/);
+  assert.match(await page.locator('.record-feed').innerText(), /现金\s*\+25文/);
   await layout('顶部操作响应');
   const states = [
     ['初始', original],
@@ -175,8 +231,23 @@ try {
     await page.setViewportSize({ width: w, height: h });
     for (const [name, s] of states) {
       await load(s);
-      for (const tab of ['市场', '资产', '生产', '住宅', '人物', '情报', '账本']) {
+      for (const tab of [
+        '市场',
+        '资产',
+        '生产',
+        '住宅',
+        '人物',
+        '情报',
+        '账本',
+      ]) {
         await button(tab).click();
+        if (tab === '情报' && name === '满列表') {
+          assert.doesNotMatch(
+            await page.locator('.detail').innerText(),
+            /你回访了原来的消息来源/,
+          );
+          assert(await button('回访核对').isDisabled());
+        }
         await layout(`${w}x${h}-${name}-${tab}`);
       }
       await button('生产').click();
@@ -221,21 +292,19 @@ try {
     await button('价格记录').click();
     await layout(`${w}x${h}-行情历史`);
     await button('交易详情').click();
-    const last = page
-      .locator('.list-column')
-      .getByRole('button', { name: '下一页', exact: true });
-    while (await last.isEnabled()) await last.click();
+    await page
+      .locator('.item-list')
+      .evaluate((e) => (e.scrollTop = e.scrollHeight));
     await layout(`${w}x${h}-市场末页`);
   }
   // Visible-control transaction and fatigue confirmation.
   await load(original);
-  await button('进入市场').click();
   await page.getByLabel('粟米数量').fill('1.5');
   await button('买入').click();
   assert.equal((await read()).cash, original.cash - 32);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
-  assert.equal((await read()).phase, 'market');
+  assert.equal((await read()).phase, 'day');
   await load({ ...original, stamina: 40 });
   await button('人物').click();
   await button('重活 · 40文').click();
@@ -250,13 +319,15 @@ try {
   assert(await button('开工').isDisabled());
   const legacy = structuredClone(original);
   delete legacy.ledger.purchases;
+  delete legacy.saveRevision;
+  delete legacy.operationHistory;
   await load(legacy);
   await button('人物').click();
   await button('休息 · 恢复25体力').click();
   assert.deepEqual(
     JSON.parse(
       await page.evaluate(() =>
-        localStorage.getItem('bianliang-save-v2-before-20260910'),
+        localStorage.getItem('bianliang-save-v2-before-ux-revision-2'),
       ),
     ),
     legacy,

@@ -145,7 +145,7 @@ export const GOODS: Record<
 export const GOOD_IDS = Object.keys(GOODS) as Good[];
 
 export const BUFFS: Record<Buff, { name: string; detail: string }> = {
-  outsider: { name: '异乡人', detail: '前三日听消息时多一条交叉线索' },
+  outsider: { name: '异乡人', detail: '初到汴梁，听到消息后记得追问出处' },
   regular: { name: '粮商熟客', detail: '购买粟米九五折，仍保留买卖差价' },
   tired: { name: '劳累', detail: '劳动和生产体力成本 +5' },
   cold: { name: '风寒', detail: '夜间健康 −2；持续两夜' },

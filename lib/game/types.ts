@@ -147,6 +147,7 @@ export interface IntelTemplate {
   skill?: SkillId;
 }
 export interface IntelEntry {
+  customerId?: CustomerId;
   id: string;
   templateId: string;
   title?: string;
@@ -217,6 +218,9 @@ export interface Log {
   items: string;
 }
 export interface Ledger {
+  depositsPaid: number;
+  depositsReturned: number;
+  depositLosses: number;
   purchases: number;
   returns: number;
   losses: number;
@@ -235,7 +239,44 @@ export interface Ledger {
   workIncome: number;
 }
 
+export interface OperationResult {
+  depositLoss?: number;
+  milestones?: string[];
+  customers?: { id: CustomerId; change: number }[];
+  id: number;
+  day: number;
+  action: Action['type'];
+  actionKey: string;
+  title: string;
+  success: boolean;
+  error?: string;
+  cash: number;
+  health: number;
+  stamina: number;
+  items: { good: Good; quantity: number }[];
+  skills: { skill: SkillId; xp: number; level: number }[];
+  states: { buff: Buff; active: boolean }[];
+  jobs: {
+    id: number;
+    recipeId: string;
+    readyDay: number;
+    status: ProductionJob['status'];
+  }[];
+  sale: { revenue: number; cost: number; profit: number } | null;
+  workRemaining: number | null;
+  details: string[];
+}
+
 export interface GameState {
+  commerce: CommerceState;
+  saveRevision: number;
+  operationHistory: OperationResult[];
+  nightPreference: {
+    meal: Meal;
+    bed: Bed;
+    feedMode: 'all' | 'fixed';
+    feed: number;
+  } | null;
   version: number;
   rules: string;
   seed: number;
@@ -303,6 +344,9 @@ export interface GameState {
 }
 
 export type Action =
+  | { type: 'acceptOrder'; orderId: number; confirm?: string }
+  | { type: 'deliverOrder' | 'abandonOrder' | 'declineOrder'; orderId: number }
+  | { type: 'meetCustomer' | 'visitCustomer'; customerId: CustomerId }
   | {
       type:
         | 'market'
@@ -312,11 +356,12 @@ export type Action =
         | 'heavy'
         | 'rest'
         | 'endDay'
-        | 'return'
         | 'stay'
         | 'inspect'
-        | 'snack';
+        | 'snack'
+        | 'returnDay';
     }
+  | { type: 'return'; confirm?: string }
   | { type: 'treat'; mode: 'fast' | 'slow' }
   | { type: 'rent' | 'coop' }
   | { type: 'rentHousing' | 'buyHousing'; housing: HousingId }
@@ -326,7 +371,63 @@ export type Action =
   | { type: 'install'; equipment: EquipmentKind }
   | { type: 'uninstall' | 'sellEquipment'; equipmentId: number }
   | { type: 'produce'; recipeId: string; quantity: number }
+  | { type: 'refill'; recipeId: string; quantity: number }
   | { type: 'cancelProduction'; jobId: number }
   | { type: 'trade'; good: Good; quantity: number; side: 'buy' | 'sell' }
   | { type: 'choice'; id: string; eventId: number }
-  | { type: 'night'; meal: Meal; bed: Bed; feed: number };
+  | { type: 'night'; meal: Meal; bed: Bed; feed: number; feedAll?: boolean };
+
+export type CustomerId =
+  | 'baker'
+  | 'clothier'
+  | 'innkeeper'
+  | 'eggSeller'
+  | 'merchant'
+  | 'ferryman';
+export type OrderStatus =
+  | 'offered'
+  | 'declined'
+  | 'accepted'
+  | 'delivered'
+  | 'failed'
+  | 'expired';
+export interface Order {
+  id: number;
+  templateId: string;
+  customer: CustomerId;
+  title: string;
+  description: string;
+  goods: Partial<Record<Good, number>>;
+  prices: Partial<Record<Good, number>>;
+  price: number;
+  deposit: number;
+  highRisk: boolean;
+  postedDay: number;
+  deadline: number;
+  status: OrderStatus;
+  settledDay: number | null;
+}
+export interface CommerceState {
+  rng: number;
+  enabledDay: number;
+  generatedDay: number;
+  orders: Order[];
+  relations: Record<CustomerId, number>;
+  customers: Partial<
+    Record<
+      CustomerId,
+      {
+        met: boolean;
+        visited: number;
+        lastOutcome: 'delivered' | 'failed' | null;
+      }
+    >
+  >;
+  seen: Record<string, number>;
+  completed: number;
+  failed: number;
+  milestones: Record<string, number>;
+  positiveDays: number;
+  profitAtDawn: number;
+  profitSinceDay: number;
+}

@@ -7,14 +7,14 @@
   },
   "scripts": {
     "dev": "vinext dev --hostname 127.0.0.1 --port 4173",
-    "test": "node --test tests/engine.test.ts tests/webmcp.test.ts",
+    "test": "node --test tests/*.test.ts",
     "simulate": "node tests/simulate.ts",
     "typecheck": "tsc --noEmit",
     "build": "node --import ./scripts/build-shutdown.mjs node_modules/vinext/dist/cli.js build",
     "start": "node scripts/serve.mjs",
-    "lint": "oxlint app lib/game tests scripts",
+    "lint": "oxlint app lib/game tests scripts components/game-commerce.tsx components/game-feedback.tsx components/game-icons.tsx components/game-shell.tsx hooks/use-workspace-value.ts",
     "format": "oxfmt",
-    "test:browser": "node tests/browser.mjs && node tests/browser-flow.mjs",
+    "test:browser": "node tests/browser.mjs && node tests/browser-flow.mjs && node tests/browser-ux.mjs && node tests/browser-commerce.mjs",
     "test:content": "node tests/content-review.ts"
   },
   "dependencies": {

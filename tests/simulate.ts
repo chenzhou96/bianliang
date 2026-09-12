@@ -13,7 +13,14 @@ import {
   installed,
   henCapacity,
   readSave,
+  orderPreview,
+  availableSurplus,
 } from '../lib/game/engine.ts';
+import {
+  orderTerms,
+  returnTerms,
+  publicCalendar,
+} from '../lib/game/commerce.ts';
 import {
   EQUIPMENT,
   GOODS,
@@ -36,7 +43,10 @@ type Strategy =
   | 'food'
   | 'textile'
   | 'brewing'
-  | 'mixed';
+  | 'mixed'
+  | 'order-trade'
+  | 'order-risk'
+  | 'festival';
 const strategies: Strategy[] = [
   'labor',
   'trade',
@@ -45,6 +55,9 @@ const strategies: Strategy[] = [
   'textile',
   'brewing',
   'mixed',
+  'order-trade',
+  'order-risk',
+  'festival',
 ];
 const specialties: Partial<
   Record<
@@ -69,6 +82,7 @@ const specialties: Partial<
     equipment: ['stove', 'pickleVat'],
     recipes: ['bread', 'saltedEgg'],
   },
+  festival: { skill: 'brewing', equipment: ['brewVat'], recipes: ['wine'] },
 };
 export function run(
   seed: number,
@@ -80,10 +94,12 @@ export function run(
   let steps = 0;
   let maxSaveBytes = 0;
   let futureDays = 0;
+  let acceptedOrders = 0;
   const attempt = (a: Action) => {
     steps++;
     const r = dispatch(s, a);
     if (r.error) return false;
+    if (a.type === 'acceptOrder') acceptedOrders++;
     s = r.state;
     return true;
   };
@@ -113,15 +129,30 @@ export function run(
   while (s.phase !== 'ended' && s.day <= maxDay) {
     resolve();
     if (s.cash >= s.target && !neverReturn) {
-      assert(attempt({ type: 'return' }));
+      assert(attempt({ type: 'return', confirm: returnTerms(s) }));
       break;
     }
     attempt({ type: 'rest' });
     attempt({ type: 'snack' });
     // Only today's visible prices, inventory costs and public configuration drive decisions.
     for (const g of GOOD_IDS) {
+      if (strategy.startsWith('order-')) continue;
       if (g === 'hen') continue;
-      const q = Math.floor(quantity(s, g));
+      if (
+        strategy === 'festival' &&
+        s.cash > 500 &&
+        publicCalendar(s).some((f) => f.goods.includes(g) && f.start > s.day) &&
+        !s.batches.some(
+          (b) =>
+            b.good === g &&
+            b.expires !== null &&
+            b.expires < publicCalendar(s)[0].start,
+        )
+      )
+        continue;
+      const q = Math.floor(
+        strategy.startsWith('order-') ? availableSurplus(s, g) : quantity(s, g),
+      );
       const produced = s.batches.some(
         (b) => b.good === g && b.origin === 'production',
       );
@@ -131,7 +162,7 @@ export function run(
       );
       if (
         produced ||
-        (strategy === 'trade' &&
+        (['trade', 'order-trade', 'order-risk'].includes(strategy) &&
           q > 0 &&
           (quote(s, g).sell > c * 1.08 || expiry))
       )
@@ -140,6 +171,58 @@ export function run(
     leave();
     if (s.housing.id === 'street' && s.cash > HOUSING.room.cost + 120)
       attempt({ type: 'rentHousing', housing: 'room' });
+    if (strategy.startsWith('order-')) {
+      // Contract prices and past observations are public. No future price or RNG access.
+      for (const o of s.commerce.orders
+        .filter((o) => o.status === 'offered')
+        .sort(
+          (a, b) => orderPreview(s, b).profit - orderPreview(s, a).profit,
+        )) {
+        if (o.highRisk && strategy === 'order-trade') continue;
+        const costFloor = Object.entries(o.goods).reduce((n, [id, q]) => {
+          const g = id as Good;
+          const observed = Math.min(
+            quote(s, g).buy,
+            ...s.history.map((h) => h.prices[g].buy),
+          );
+          return n + q! * observed;
+        }, 0);
+        const p = orderPreview(s, o);
+        if (
+          o.price - costFloor < 30 ||
+          p.profit < 20 ||
+          s.cash <
+            o.deposit +
+              p.purchaseCost +
+              120 +
+              s.commerce.orders
+                .filter((x) => x.status === 'accepted')
+                .reduce((n, x) => n + orderPreview(s, x).purchaseCost, 0) ||
+          p.carrying > 80
+        )
+          continue;
+        attempt({ type: 'acceptOrder', orderId: o.id, confirm: orderTerms(o) });
+      }
+      for (const original of s.commerce.orders.filter(
+        (o) => o.status === 'accepted',
+      )) {
+        const o = s.commerce.orders.find((x) => x.id === original.id)!;
+        const p = orderPreview(s, o);
+        if (
+          (p.profit >= 20 || o.deadline <= s.day + 1 || p.deliverable) &&
+          p.purchaseCost < s.cash - 65
+        ) {
+          for (const m of p.materials)
+            if (m.missing)
+              buy(
+                m.good,
+                Math.min(m.missing, Math.max(0, Math.floor(s.stamina - 10))),
+              );
+          leave();
+          attempt({ type: 'deliverOrder', orderId: o.id });
+        }
+      }
+    }
     if (special) {
       const level = s.skills[special.skill];
       if (
@@ -180,6 +263,7 @@ export function run(
           id: string;
           n: number;
           profit: number;
+          score: number;
           inputs: Partial<Record<Good, number>>;
         } | null = null;
         for (const r of RECIPES.filter(
@@ -213,8 +297,18 @@ export function run(
               profit <= 0
             )
               continue;
-            if (!best || profit > best.profit)
-              best = { id: r.id, n, profit, inputs: p.inputs };
+            const score =
+              strategy === 'festival' &&
+              publicCalendar(s).some(
+                (f) =>
+                  f.goods.includes(r.output) &&
+                  s.day + r.duration >= f.start &&
+                  s.day + r.duration <= f.end,
+              )
+                ? profit * 1.1
+                : profit;
+            if (!best || score > best.score)
+              best = { id: r.id, n, profit, score, inputs: p.inputs };
           }
         if (!best) break;
         let ok = true;
@@ -231,7 +325,23 @@ export function run(
         }
       }
     }
-    if (strategy === 'trade') {
+    if (['trade', 'order-trade', 'order-risk'].includes(strategy)) {
+      if (strategy.startsWith('order-')) {
+        for (const g of GOOD_IDS) {
+          if (g === 'hen') continue;
+          const q = Math.floor(availableSurplus(s, g));
+          const c = q ? inventoryCost(s, g, q) / q : 0;
+          if (
+            q > 0 &&
+            (quote(s, g).sell > c * 1.08 ||
+              s.batches.some(
+                (b) =>
+                  b.good === g && b.expires !== null && b.expires <= s.day + 1,
+              ))
+          )
+            sell(g, q);
+        }
+      }
       const choices = GOOD_IDS.filter(
         (g) =>
           !GOODS[g].life &&
@@ -243,10 +353,25 @@ export function run(
           quote(s, b).buy -
           (GOODS[a].base * 0.92 - quote(s, a).buy),
       );
-      if (choices[0]) {
+      if (
+        choices[0] &&
+        !(
+          strategy.startsWith('order-') &&
+          s.commerce.orders.some((o) => o.status === 'accepted')
+        )
+      ) {
         const g = choices[0];
         const q = Math.min(
-          Math.floor((s.cash - 150) / quote(s, g).buy),
+          Math.floor(
+            (s.cash -
+              150 -
+              (strategy.startsWith('order-')
+                ? s.commerce.orders
+                    .filter((o) => o.status === 'accepted')
+                    .reduce((n, o) => n + orderPreview(s, o).purchaseCost, 0)
+                : 0)) /
+              quote(s, g).buy,
+          ),
           Math.floor((capacity(s) - occupied(s)) / 10),
           Math.max(0, s.stamina - 15),
         );
@@ -261,7 +386,7 @@ export function run(
     resolve();
     if (s.health < 65 && s.cash > 100) attempt({ type: 'treat', mode: 'slow' });
     if (s.cash >= s.target && !neverReturn) {
-      assert(attempt({ type: 'return' }));
+      assert(attempt({ type: 'return', confirm: returnTerms(s) }));
       break;
     }
     assert(attempt({ type: 'endDay' }));
@@ -325,32 +450,67 @@ export function run(
     steps,
     maxSaveBytes,
     futureDays,
+    acceptedOrders,
+    completedOrders: s.commerce.completed,
+    failedOrders: s.commerce.failed,
+    depositLosses: s.ledger.depositLosses,
+    death: s.ending === 'death',
+    cashExhausted: s.cash === 0 && s.ending !== 'return',
   };
 }
 const samples = Number(process.env.SIMULATION_SAMPLES ?? 100);
 const days = Number(process.env.SIMULATION_DAYS ?? 180);
-const rows = strategies.flatMap((strategy) =>
+const selectedStrategies = process.env.SIMULATION_STRATEGIES
+  ? strategies.filter((s) =>
+      process.env.SIMULATION_STRATEGIES!.split(',').includes(s),
+    )
+  : strategies;
+assert(selectedStrategies.length > 0);
+const rows = selectedStrategies.flatMap((strategy) =>
   Array.from({ length: samples }, (_, i) =>
     run((i + 1) * 7919, strategy, days),
   ),
 );
-const summary = strategies.map((strategy) => {
+const summary = selectedStrategies.map((strategy) => {
   const g = rows.filter((r) => r.strategy === strategy);
   return {
     strategy,
     runs: g.length,
     wins: g.filter((r) => r.ending === 'return').length,
+    meanWinDay: g.some((r) => r.ending === 'return')
+      ? +(
+          g
+            .filter((r) => r.ending === 'return')
+            .reduce((n, r) => n + r.day, 0) /
+          g.filter((r) => r.ending === 'return').length
+        ).toFixed(1)
+      : null,
     meanDay: +(g.reduce((a, r) => a + r.day, 0) / g.length).toFixed(1),
     meanCash: Math.round(g.reduce((a, r) => a + r.cash, 0) / g.length),
     meanProfit: Math.round(g.reduce((a, r) => a + r.profit, 0) / g.length),
     meanProduction: Math.round(
       g.reduce((a, r) => a + r.productionRuns, 0) / g.length,
     ),
+    orderCompletions: g.reduce((n, r) => n + r.completedOrders, 0),
+    orderFailures: g.reduce((n, r) => n + r.failedOrders, 0),
+    defaultRate: +(
+      g.reduce((n, r) => n + r.failedOrders, 0) /
+      Math.max(
+        1,
+        g.reduce((n, r) => n + r.acceptedOrders, 0),
+      )
+    ).toFixed(4),
+    depositLosses: g.reduce((n, r) => n + r.depositLosses, 0),
+    deaths: g.filter((r) => r.death).length,
+    cashExhausted: g.filter((r) => r.cashExhausted).length,
   };
 });
-const stability = run(20260910, 'food', 1000, true);
+const stability =
+  process.env.SIMULATION_SKIP_STABILITY === '1'
+    ? null
+    : run(20260910, 'food', 1000, true);
 const result = {
-  notice: `七策略使用相同${samples}组种子，统一30000文目标，观察${days}日。策略不读隐藏日程、真相或随机数。`,
+  notice: `${selectedStrategies.length}策略使用相同${samples}组种子，统一30000文目标，观察${days}日。策略不读隐藏日程、真相或随机数。`,
   summary,
   stability,
   rows,

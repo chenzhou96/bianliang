@@ -1,4 +1,4 @@
-import { GOODS, GOOD_IDS, HOUSING, SKILLS } from './config.ts';
+import { GOODS, GOOD_IDS, HOUSING, SKILLS, RECIPES } from './config.ts';
 import {
   capacity,
   occupied,
@@ -6,8 +6,25 @@ import {
   quantity,
   rumorStatus,
   reserved,
+  recipeQuote,
+  availableSurplus,
+  orderPreview,
+  actionPreview,
+  maximumTrade,
+  maximumProduction,
 } from './engine.ts';
-import type { Action, GameState } from './types.ts';
+import { todayTasks } from './today.ts';
+import {
+  CUSTOMERS,
+  CUSTOMER_IDS,
+  MILESTONES,
+  publicCalendar,
+  milestoneProgress,
+  customerStage,
+  orderTerms,
+  returnTerms,
+} from './commerce.ts';
+import type { Action, GameState, OperationResult } from './types.ts';
 
 export function publicState(s: GameState | null) {
   if (!s) return { started: false };
@@ -24,6 +41,33 @@ export function publicState(s: GameState | null) {
     reputation: s.reputation,
     story: s.story,
     lastResponse: s.lastResponse,
+    lastOperation: s.operationHistory.at(-1) ?? null,
+    operationHistory: s.operationHistory,
+    nightPreference: s.nightPreference,
+    todayTasks: todayTasks(s),
+    orders: s.commerce.orders.map((o) => ({
+      ...o,
+      preview: orderPreview(s, o),
+    })),
+    calendar: publicCalendar(s),
+    milestones: MILESTONES.map((m) => ({
+      ...m,
+      completedDay: s.commerce.milestones[m.id] ?? null,
+      progress: milestoneProgress(s, m.id),
+    })),
+    customers: CUSTOMER_IDS.filter((id) => s.commerce.customers[id]?.met).map(
+      (id) => ({
+        id,
+        name: CUSTOMERS[id].name,
+        relation: s.commerce.relations[id],
+        availableStage: customerStage(s, id),
+        visitedStage: s.commerce.customers[id]!.visited,
+        stories: CUSTOMERS[id].stories.slice(
+          0,
+          s.commerce.customers[id]!.visited,
+        ),
+      }),
+    ),
     ending: s.ending,
     housing: {
       id: s.housing.id,
@@ -45,22 +89,32 @@ export function publicState(s: GameState | null) {
     inventory: Object.fromEntries(
       GOOD_IDS.map((g) => [
         g,
-        { name: GOODS[g].name, quantity: quantity(s, g), price: quote(s, g) },
+        {
+          name: GOODS[g].name,
+          quantity: quantity(s, g),
+          price: quote(s, g),
+          surplus: availableSurplus(s, g),
+        },
       ]),
     ),
     market: Object.fromEntries(GOOD_IDS.map((g) => [g, quote(s, g)])),
+    recipes: RECIPES.map((r) => ({
+      id: r.id,
+      name: r.name,
+      preview: recipeQuote(s, r.id, 1),
+    })),
     equipment: s.equipment,
     ledger: s.ledger,
     intelligence: s.intel.map((i) => ({
       id: i.id,
-      followUp: i.followUp,
+      followUp: i.asked || i.visited ? i.followUp : undefined,
       asked: i.asked,
       visited: i.visited,
       category: i.category,
       source: i.source,
       text: i.text,
       heardDay: i.heardDay,
-      status: i.status,
+      status: i.visited ? i.status : 'new',
     })),
     rumors: s.worlds
       .filter((w) => w.heard)
@@ -69,7 +123,10 @@ export function publicState(s: GameState | null) {
         source: w.source,
         expected: w.expected,
         status: rumorStatus(s, w),
-        ...(w.clueKnown ? { clue: w.clue } : {}),
+        ...(w.clueKnown &&
+        s.intel.some((i) => i.worldId === w.id && (i.asked || i.visited))
+          ? { clue: w.clue }
+          : {}),
       })),
     production: s.jobs
       .filter((j) => j.status === 'queued')
@@ -115,11 +172,60 @@ export interface ModelContext {
 export function registerGameTools(
   context: ModelContext | undefined,
   getState: () => GameState | null,
-  execute: (a: Action, revision: number) => { error?: string },
+  execute: (
+    a: Action,
+    revision: number,
+  ) => { error?: string; result?: OperationResult },
 ) {
   if (!context?.registerTool) return () => {};
   const controller = new AbortController();
   const tools: Tool[] = [
+    {
+      name: 'preview_bianliang_action',
+      description:
+        '预览行动消耗、失败原因和确认条款。交易或生产同时返回当前可执行的最大数量；不会修改状态。',
+      inputSchema: {
+        type: 'object',
+        properties: { action: { type: 'object' } },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, untrustedContentHint: false },
+      execute: (input) => {
+        const s = getState();
+        if (!s) return { error: '请先开始游戏' };
+        const a = (input as { action?: Action } | null)?.action;
+        if (!a || typeof a.type !== 'string') return { error: '无效操作参数' };
+        try {
+          const preview = actionPreview(s, a);
+          const contract =
+            a.type === 'acceptOrder'
+              ? s.commerce.orders.find((o) => o.id === a.orderId)
+              : undefined;
+          const confirmationToken = contract?.highRisk
+            ? orderTerms(contract)
+            : a.type === 'return'
+              ? returnTerms(s)
+              : undefined;
+          const maximum =
+            a.type === 'trade' &&
+            GOOD_IDS.includes(a.good) &&
+            ['buy', 'sell'].includes(a.side)
+              ? maximumTrade(s, a.good, a.side)
+              : a.type === 'produce' && RECIPES.some((r) => r.id === a.recipeId)
+                ? maximumProduction(s, a.recipeId)
+                : undefined;
+          return {
+            revision: s.revision,
+            ...preview,
+            ...(confirmationToken ? { confirmationToken } : {}),
+            ...(maximum === undefined ? {} : { maximum }),
+          };
+        } catch {
+          return { error: '无效操作参数' };
+        }
+      },
+    },
     {
       name: 'read_bianliang_game',
       description:
@@ -163,7 +269,11 @@ export function registerGameTools(
                 ],
               },
               feed: { type: 'integer' },
+              feedAll: { type: 'boolean' },
               recipeId: { type: 'string' },
+              orderId: { type: 'integer' },
+              confirm: { type: 'string' },
+              customerId: { enum: CUSTOMER_IDS },
               skill: { enum: Object.keys(SKILLS) },
               equipment: { type: 'string' },
               housing: { type: 'string' },

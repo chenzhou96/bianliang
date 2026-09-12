@@ -15,6 +15,25 @@ import {
   WORLD_FAMILIES,
 } from './config.ts';
 import { EVENTS, INFO_TEMPLATES, out, option, decline } from './content.ts';
+import { isOperatingAction, operationResult } from './feedback.ts';
+import {
+  newCommerce,
+  generateOrders,
+  updateMilestones,
+  businessProfit,
+  festivalOn,
+  orderTerms,
+  returnTerms,
+  orderReserved,
+  CUSTOMERS,
+  CUSTOMER_DECLINES,
+  CUSTOMER_IDS,
+  customerStage,
+  customerOpportunity,
+  productionEarliest,
+  validCommerce,
+  MILESTONES,
+} from './commerce.ts';
 import type {
   Action,
   Batch,
@@ -27,6 +46,8 @@ import type {
   IntelEntry,
   ProductionJob,
   Recipe,
+  OperationResult,
+  Order,
   SkillId,
 } from './types.ts';
 
@@ -91,6 +112,9 @@ export function quote(s: GameState, g: Good) {
 export function assets(s: GameState) {
   return (
     s.cash +
+    s.commerce.orders
+      .filter((o) => o.status === 'accepted')
+      .reduce((n, o) => n + o.deposit, 0) +
     GOOD_IDS.reduce(
       (a, g) => a + Math.floor(quantity(s, g) * quote(s, g).sell),
       0,
@@ -148,7 +172,8 @@ function consume(s: GameState, g: Good, units: number) {
     (a, b) => (a.expires ?? 99999) - (b.expires ?? 99999) || a.id - b.id,
   );
   for (const b of s.batches) {
-    if (b.good !== g || !left) continue;
+    if (b.good !== g || !left || (b.expires !== null && b.expires < s.day))
+      continue;
     const take = Math.min(left, b.units);
     const c = take === b.units ? b.cost : Math.floor((b.cost * take) / b.units);
     b.units -= take;
@@ -218,7 +243,7 @@ export function updatePrices(s: GameState) {
     s.trendUntil = s.day + integer(s, 3, 6);
   }
   for (const g of GOOD_IDS) {
-    let factor = 1;
+    let factor = festivalOn(s.day)?.goods.includes(g) ? 1.1 : 1;
     for (const w of s.worlds)
       if (
         (w.good === g || GOODS[w.good].category === GOODS[g].category) &&
@@ -247,6 +272,9 @@ function emptySkills(): Record<SkillId, number> {
 }
 function emptyLedger() {
   return {
+    depositsPaid: 0,
+    depositsReturned: 0,
+    depositLosses: 0,
     purchases: 0,
     returns: 0,
     losses: 0,
@@ -267,6 +295,10 @@ function emptyLedger() {
 }
 export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
   const s: GameState = {
+    commerce: newCommerce({ seed, day: 1, ledger: emptyLedger() }),
+    saveRevision: 2,
+    operationHistory: [],
+    nightPreference: null,
     version: 2,
     rules: RULES.version,
     seed: seed >>> 0,
@@ -491,7 +523,7 @@ function effect(s: GameState, e: Effect, person: string, acquisitionCost = 0) {
   }
 }
 function requireDay(s: GameState) {
-  if (s.phase !== 'day' || s.event)
+  if (!['day', 'market'].includes(s.phase) || s.event)
     throw Error('请先结束当前安排或处理眼前的遭遇');
 }
 function finishAction(s: GameState, encounter = true) {
@@ -533,7 +565,117 @@ export function inventoryCost(s: GameState, good: Good, q = quantity(s, good)) {
     ? consume(copy, good, Math.round(q * 10)).cost
     : 0;
 }
+
+export function recipeQuote(s: GameState, recipeId: string, n: number) {
+  const recipe = RECIPE_MAP[recipeId];
+  if (!recipe || !Number.isInteger(n) || n < 1 || n > 20)
+    throw Error('请选择有效配方与1～20批加工量');
+  const plan = productionPlan(s, recipe, n);
+  const materials = Object.entries(plan.inputs).map(([id, units]) => {
+    const good = id as Good;
+    const needed = units! / 10;
+    const owned = quantity(s, good);
+    const used = Math.min(owned, needed);
+    const missing = Math.round((needed - used) * 10) / 10;
+    return {
+      good,
+      needed,
+      owned,
+      missing,
+      stockCost: inventoryCost(s, good, used),
+      refillCost: Math.ceil(quote(s, good).buy * missing),
+      replacementCost: Math.ceil(quote(s, good).buy * needed),
+    };
+  });
+  const totalMissing = materials.reduce((n, m) => n + m.missing, 0);
+  const carrying =
+    Math.ceil(s.daily.tradeUnits + totalMissing - 1e-9) -
+    Math.ceil(s.daily.tradeUnits - 1e-9);
+  const refillCost = materials.reduce((n, m) => n + m.refillCost, 0);
+  const stockCost = materials.reduce((n, m) => n + m.stockCost, 0);
+  const revenue = Math.floor(
+    (quote(s, recipe.output).sell * plan.outputUnits) / 10,
+  );
+  return {
+    ...plan,
+    materials,
+    carrying,
+    refillCost,
+    revenue,
+    stockProfit: totalMissing ? null : revenue - stockCost,
+    refillProfit: revenue - stockCost - refillCost,
+    replacementProfit:
+      revenue - materials.reduce((n, m) => n + m.replacementCost, 0),
+  };
+}
+
+export function maximumTrade(s: GameState, good: Good, side: 'buy' | 'sell') {
+  const scale = good === 'grain' ? 10 : 1;
+  let lo = 0,
+    hi =
+      side === 'sell'
+        ? Math.floor(quantity(s, good) * scale)
+        : Math.min(
+            100000 * scale,
+            Math.floor((s.cash / quote(s, good).buy) * scale),
+          );
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const r = dispatch(s, { type: 'trade', side, good, quantity: mid / scale });
+    if (r.error) hi = mid - 1;
+    else lo = mid;
+  }
+  return lo / scale;
+}
+
+export function maximumProduction(s: GameState, recipeId: string) {
+  for (let n = 20; n >= 1; n--)
+    if (!dispatch(s, { type: 'produce', recipeId, quantity: n }).error)
+      return n;
+  return 0;
+}
+
+export function reservedFood(s: GameState, good: Good) {
+  const meal =
+    s.nightPreference?.meal ?? (quantity(s, 'bread') >= 1 ? 'bread' : 'diner');
+  return (
+    (meal === good ? (meal === 'egg' ? 2 : 1) : 0) +
+    (good === 'grain'
+      ? (s.hens.length * (s.skills.husbandry >= 3 ? 1 : RULES.feed)) / 10
+      : 0)
+  );
+}
+
+export function availableSurplus(s: GameState, good: Good) {
+  const scale = good === 'grain' ? 10 : 1;
+  return (
+    Math.floor(
+      Math.max(
+        0,
+        quantity(s, good) - reservedFood(s, good) - orderReserved(s, good),
+      ) * scale,
+    ) / scale
+  );
+}
 export function actionEnergy(s: GameState, a: Action) {
+  if (a.type === 'deliverOrder') {
+    const order = s.commerce.orders.find((o) => o.id === a.orderId);
+    return order
+      ? Math.ceil(
+          s.daily.tradeUnits +
+            Object.values(order.goods).reduce((n, q) => n + q!, 0) -
+            1e-9,
+        ) - Math.ceil(s.daily.tradeUnits - 1e-9)
+      : 0;
+  }
+  if (a.type === 'meetCustomer' || a.type === 'visitCustomer') return 5;
+  if (a.type === 'refill') {
+    try {
+      return recipeQuote(s, a.recipeId, a.quantity).carrying;
+    } catch {
+      return 0;
+    }
+  }
   if (a.type === 'trade') return tradeStamina(s, a.good, a.quantity);
   if (a.type === 'produce')
     return RECIPE_MAP[a.recipeId]
@@ -554,14 +696,54 @@ export function actionEnergy(s: GameState, a: Action) {
 }
 export function actionPreview(s: GameState, a: Action) {
   const energy = actionEnergy(s, a);
-  const result = dispatch(s, a);
+  const order =
+    a.type === 'acceptOrder'
+      ? s.commerce.orders.find((o) => o.id === a.orderId)
+      : undefined;
+  const risky = order?.highRisk && order.status === 'offered';
+  const abandoned =
+    a.type === 'abandonOrder'
+      ? s.commerce.orders.find(
+          (o) => o.id === a.orderId && o.status === 'accepted',
+        )
+      : undefined;
+  const returning = a.type === 'return' && !!returnTerms(s);
+  const result = dispatch(
+    s,
+    risky
+      ? ({ ...a, confirm: orderTerms(order) } as Action)
+      : returning
+        ? ({ ...a, confirm: returnTerms(s) } as Action)
+        : a,
+  );
   return {
     error: result.error,
     energy,
-    warning:
+    confirmation:
+      !!risky ||
+      returning ||
+      (energy > 0 && s.stamina >= 10 && s.stamina - energy < 10),
+    warning: [
       energy > 0 && s.stamina >= 10 && s.stamina - energy < 10
         ? '这次操作会让体力低于10：健康−2，并进入劳累。'
         : '',
+      a.type === 'trade' &&
+      a.side === 'sell' &&
+      a.quantity > availableSurplus(s, a.good)
+        ? '此次出售将动用口粮、饲料或订单备货，请及时补齐。'
+        : '',
+      risky
+        ? `接单冻结保证金${order.deposit}文；逾期或放弃全额没收，客户关系−2。第${order.deadline}日白天截止。`
+        : '',
+      abandoned
+        ? `放弃「${abandoned.title}」将没收已冻结保证金${abandoned.deposit}文，客户关系−${abandoned.highRisk ? 2 : 1}；已经投入的货物保留。`
+        : '',
+      returning
+        ? `归航前将放弃全部在途订单，损失保证金${s.commerce.orders.filter((o) => o.status === 'accepted').reduce((n, o) => n + o.deposit, 0)}文，并降低客户关系。`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   };
 }
 
@@ -689,9 +871,127 @@ function gainXp(s: GameState, skill: SkillId, n: number) {
   if (s.skills[skill] < 3 && s.skillXp[skill] >= XP_TO_LEVEL[next])
     log(s, `${SKILLS[skill].name}的手艺熟练了一些，再拜师可进阶。`);
 }
+export function orderPreview(s: GameState, order: Order) {
+  const materials = Object.entries(order.goods).map(([id, required]) => {
+    const good = id as Good;
+    const owned = s.batches
+      .filter(
+        (b) => b.good === good && (b.expires === null || b.expires >= s.day),
+      )
+      .reduce((n, b) => n + b.units / 10, 0);
+    const missing = Math.max(0, required! - owned);
+    return {
+      good,
+      required: required!,
+      owned,
+      missing,
+      buyCost: Math.ceil(missing * quote(s, good).buy),
+      stockCost: inventoryCost(s, good, Math.min(owned, required!)),
+      earliest: missing ? productionEarliest(s, good, missing) : s.day,
+    };
+  });
+  const purchaseCost = materials.reduce((n, m) => n + m.buyCost, 0);
+  const stockCost = materials.reduce((n, m) => n + m.stockCost, 0);
+  return {
+    materials,
+    purchaseCost,
+    profit: order.price - purchaseCost - stockCost,
+    carrying: actionEnergy(s, { type: 'deliverOrder', orderId: order.id }),
+    deliverable:
+      order.status === 'accepted' &&
+      order.deadline >= s.day &&
+      materials.every((m) => m.missing === 0),
+    risk:
+      s.cash < purchaseCost + (order.status === 'offered' ? order.deposit : 0)
+        ? '现金不足以补齐全部缺货与保证金'
+        : materials.some(
+              (m) =>
+                m.missing &&
+                (m.earliest === null || m.earliest > order.deadline),
+            )
+          ? '部分缺货无法按当前设备及时自产，可考虑采购'
+          : '按当前行情估算，实际采购价与生产安排可能变化',
+  };
+}
+function failOrder(s: GameState, order: Order) {
+  if (order.status !== 'accepted') return;
+  order.status = 'failed';
+  order.settledDay = s.day;
+  s.ledger.depositLosses += order.deposit;
+  s.commerce.failed++;
+  s.commerce.relations[order.customer] = Math.max(
+    -5,
+    s.commerce.relations[order.customer] - (order.highRisk ? 2 : 1),
+  );
+  const customer = s.commerce.customers[order.customer] ?? {
+    met: true,
+    visited: 0,
+    lastOutcome: null,
+  };
+  customer.lastOutcome = 'failed';
+  s.commerce.customers[order.customer] = customer;
+  log(
+    s,
+    `订单「${order.title}」未履约，没收已冻结保证金${order.deposit}文，客户关系下降。${CUSTOMERS[order.customer].failure}`,
+  );
+}
+function deliverOrder(s: GameState, order: Order) {
+  const preview = orderPreview(s, order);
+  if (order.status !== 'accepted') throw Error('订单尚未接取或已结算');
+  if (s.day > order.deadline) throw Error('订单已超过交期');
+  const missing = preview.materials.filter((m) => m.missing > 0);
+  if (missing.length)
+    throw Error(
+      `尚缺${missing.map((m) => `${GOODS[m.good].name}${m.missing}`).join('、')}`,
+    );
+  if (s.stamina < preview.carrying)
+    throw Error(`交货搬运需要${preview.carrying}体力`);
+  for (const [id, q] of Object.entries(order.goods)) {
+    const good = id as Good,
+      units = q! * 10;
+    const taken = consume(s, good, units);
+    const income = order.prices[good]! * q!;
+    const productionIncome = Math.floor((income * taken.production) / units);
+    s.ledger.productionRevenue += productionIncome;
+    s.ledger.productionCost += taken.productionCost;
+    s.stats.productionCostSold += taken.productionCost;
+    s.ledger.tradeRevenue += income - productionIncome;
+    s.ledger.tradeCost += taken.cost - taken.productionCost;
+    s.stats.profit +=
+      income - productionIncome - (taken.cost - taken.productionCost);
+  }
+  money(s, order.price, `交付订单「${order.title}」`);
+  if (order.deposit) money(s, order.deposit, '返还履约保证金');
+  s.ledger.depositsReturned += order.deposit;
+  s.stamina -= preview.carrying;
+  s.daily.tradeUnits += Object.values(order.goods).reduce((n, q) => n + q!, 0);
+  order.status = 'delivered';
+  order.settledDay = s.day;
+  s.commerce.completed++;
+  s.commerce.relations[order.customer] = Math.min(
+    10,
+    s.commerce.relations[order.customer] + (order.highRisk ? 2 : 1),
+  );
+  const customer = s.commerce.customers[order.customer] ?? {
+    met: true,
+    visited: 0,
+    lastOutcome: null,
+  };
+  customer.met = true;
+  customer.lastOutcome = 'delivered';
+  s.commerce.customers[order.customer] = customer;
+  s.story = `「${order.title}」如约交齐，收到货款${order.price}文${order.deposit ? `并取回保证金${order.deposit}文` : ''}。`;
+}
 function settleNight(s: GameState, a: Extract<Action, { type: 'night' }>) {
   if (s.phase !== 'night' || s.event) throw Error('现在不能结算夜晚');
   const p = nightPreview(s, a);
+  for (const order of s.commerce.orders)
+    if (order.deadline <= s.day) failOrder(s, order);
+  s.commerce.positiveDays =
+    businessProfit(s) > s.commerce.profitAtDawn
+      ? s.commerce.positiveDays + 1
+      : 0;
+  updateMilestones(s);
   money(s, -p.cash, '晚饭、住宿与住宅费用');
   s.ledger.living += p.mealCost + p.innCost;
   s.ledger.housing += p.housingCost;
@@ -787,6 +1087,8 @@ function settleNight(s: GameState, a: Extract<Action, { type: 'night' }>) {
   completeJobs(s);
   s.weather = random(s) < 0.2 ? '阴' : '晴';
   updatePrices(s);
+  s.commerce.profitAtDawn = businessProfit(s);
+  generateOrders(s);
   for (const w of s.worlds.filter(
     (w) => w.truth !== 'false' && w.start === s.day,
   ))
@@ -841,17 +1143,13 @@ function addIntel(
   };
   if (world) {
     world.heard = true;
-    if (active(s, 'outsider')) {
-      world.clueKnown = true;
-      entry.followUp = `初来乍到，伙计多说了一句：${world.clue}`;
-    }
   }
   s.intel.unshift(entry);
   s.intel = s.intel.slice(0, RULES.maxIntel);
 }
 function refreshIntelStatuses(s: GameState) {
   for (const i of s.intel) {
-    if (i.status !== 'new') continue;
+    if (i.status !== 'new' || !i.visited) continue;
     if (i.worldId) {
       const w = s.worlds.find((x) => x.id === i.worldId);
       if (w && s.day >= w.start && w.truth !== 'false') i.status = 'confirmed';
@@ -913,97 +1211,202 @@ export function operationResponse(
   return `${names[action.type] ?? '操作完成'}${changes.length ? ' · ' + changes.join('，') : ''}。${detail}`;
 }
 
+function performTrade(
+  s: GameState,
+  action: Extract<Action, { type: 'trade' }>,
+) {
+  const state = structuredClone(s);
+  requireDay(s);
+  const q = action.quantity,
+    g = action.good;
+  if (
+    !['buy', 'sell'].includes(action.side) ||
+    !GOOD_IDS.includes(g) ||
+    !Number.isFinite(q) ||
+    q <= 0 ||
+    q > 100000 ||
+    Math.abs(q * 10 - Math.round(q * 10)) > 1e-8 ||
+    (g !== 'grain' && !Number.isInteger(q))
+  )
+    throw Error('数量须为正数；粟米可输入一位小数');
+  const costStamina = tradeStamina(s, g, q);
+  if (s.stamina < costStamina) throw Error(`搬运需要${costStamina}体力`);
+  const p = quote(s, g),
+    u = Math.round(q * 10);
+  if (action.side === 'buy') {
+    const cost = Math.ceil(p.buy * q);
+    if (s.cash < cost) throw Error('现金不足');
+    if (g === 'hen') {
+      if (s.hens.length + q > henCapacity(s)) throw Error('当前养殖容量不足');
+      for (let i = 0; i < q; i++)
+        s.hens.push({ id: s.nextId++, hunger: 0, cost: p.buy });
+    } else {
+      if (reserved(s) + u > capacity(s)) throw Error('仓储容量不足');
+      add(s, g, u, cost, 'buy');
+    }
+    money(s, -cost, `买入${GOODS[g].name} ×${q}`);
+    s.ledger.purchases += cost;
+  } else {
+    if (quantity(s, g) < q) throw Error('货物不足');
+    const income = Math.floor(p.sell * q);
+    if (g === 'hen') {
+      const cost = s.hens.splice(0, q).reduce((a, h) => a + h.cost, 0);
+      s.stats.profit += income - cost;
+      s.ledger.tradeCost += cost;
+    } else {
+      const c = consume(s, g, u);
+      s.ledger.tradeCost += c.cost - c.productionCost;
+      if (c.production) {
+        s.stats.productionCostSold += c.productionCost;
+        s.ledger.productionCost += c.productionCost;
+        s.ledger.productionRevenue += Math.floor((income * c.production) / u);
+      } else s.stats.profit += income - c.cost;
+    }
+    money(s, income, `卖出${GOODS[g].name} ×${q}`);
+    const produced =
+      g === 'hen'
+        ? 0
+        : state.batches
+            .filter((b) => b.good === g && b.origin === 'production')
+            .reduce((v, b) => v + b.units, 0);
+    // The split uses the exact FIFO batch mix, including gifted inventory.
+    const soldMix =
+      g === 'hen' ? 0 : consume(structuredClone(state), g, u).production;
+    s.ledger.tradeRevenue +=
+      income - (produced ? Math.floor((income * soldMix) / u) : 0);
+  }
+  s.stamina -= costStamina;
+  s.daily.tradeUnits += q * (g === 'hen' ? 2 : RULES.tradeStaminaPerUnit);
+  s.stats.trades++;
+  s.stats.maxProfit = Math.max(s.stats.maxProfit, s.stats.profit);
+  s.story = `成交${GOODS[g].name} ×${q}，搬运消耗${costStamina}体力。`;
+}
+
 export function dispatch(
   state: GameState,
   action: Action,
   expectedRevision = state.revision,
-): { state: GameState; error?: string } {
+): { state: GameState; error?: string; result?: OperationResult } {
   if (expectedRevision !== state.revision)
-    return { state, error: '操作已更新，请勿重复提交' };
-  if (state.phase === 'ended') return { state, error: '本局已经结束' };
+    return {
+      state,
+      error: '操作已更新，请勿重复提交',
+      result: operationResult(state, state, action, '操作已更新，请勿重复提交'),
+    };
+  if (state.phase === 'ended')
+    return {
+      state,
+      error: '本局已经结束',
+      result: operationResult(state, state, action, '本局已经结束'),
+    };
   const s = structuredClone(state);
   try {
     switch (action.type) {
-      case 'market':
-        if (s.phase !== 'day' || s.event) throw Error('请先处理当前安排');
-        s.phase = 'market';
-        s.story =
-          '州桥市。看行情免费，搬运货物才消耗体力；同一次访问可连续买卖。';
+      case 'acceptOrder': {
+        requireDay(s);
+        const order = s.commerce.orders.find((o) => o.id === action.orderId);
+        if (!order || order.status !== 'offered' || order.postedDay !== s.day)
+          throw Error('该订单已失效或已经接取');
+        if (
+          s.commerce.orders.filter((o) => o.status === 'accepted').length >= 2
+        )
+          throw Error('最多同时履行两张订单');
+        if (order.highRisk && s.commerce.relations[order.customer] < 3)
+          throw Error('客户关系不足，先完成普通订单');
+        if (order.highRisk && action.confirm !== orderTerms(order))
+          throw Error('请先确认当前交期、保证金与违约成本');
+        if (s.cash < order.deposit) throw Error('现金不足以缴纳保证金');
+        if (order.deposit)
+          money(s, -order.deposit, `订单「${order.title}」冻结保证金`);
+        s.ledger.depositsPaid += order.deposit;
+        order.status = 'accepted';
+        s.commerce.customers[order.customer] ??= {
+          met: true,
+          visited: 0,
+          lastOutcome: null,
+        };
+        s.commerce.customers[order.customer]!.met = true;
+        s.story = `已接「${order.title}」，第${order.deadline}日白天前交齐；${order.deposit ? '保证金' + order.deposit + '文已冻结' : '无保证金'}。`;
+        log(s, s.story);
         break;
+      }
+      case 'declineOrder': {
+        requireDay(s);
+        const o = s.commerce.orders.find(
+          (o) =>
+            o.id === action.orderId &&
+            o.status === 'offered' &&
+            o.postedDay === s.day,
+        );
+        if (!o) throw Error('这张订单已失效或已经处理');
+        o.status = 'declined';
+        o.settledDay = s.day;
+        s.story = CUSTOMER_DECLINES[o.customer];
+        log(s, s.story);
+        break;
+      }
+      case 'deliverOrder':
+      case 'abandonOrder': {
+        requireDay(s);
+        const order = s.commerce.orders.find((o) => o.id === action.orderId);
+        if (!order || order.status !== 'accepted')
+          throw Error('没有这张进行中的订单');
+        if (action.type === 'deliverOrder') deliverOrder(s, order);
+        else {
+          failOrder(s, order);
+          s.story = CUSTOMERS[order.customer].failure;
+        }
+        break;
+      }
+      case 'meetCustomer':
+      case 'visitCustomer': {
+        requireDay(s);
+        const id = action.customerId;
+        if (!CUSTOMER_IDS.includes(id)) throw Error('找不到这位客户');
+        const c = s.commerce.customers[id];
+        if (!c?.met) throw Error('请先在茶馆追问消息或接取这位客户的订单');
+        const stage = customerStage(s, id);
+        if (c.visited >= stage && c.lastOutcome !== 'failed')
+          throw Error('暂时没有新的后续');
+        if (s.stamina < 5) throw Error('拜访需要5体力');
+        s.stamina -= 5;
+        s.story =
+          c.lastOutcome === 'failed'
+            ? CUSTOMERS[id].failure
+            : CUSTOMERS[id].stories[Math.min(stage, c.visited + 1) - 1];
+        if (c.lastOutcome !== 'failed')
+          c.visited = Math.min(stage, c.visited + 1);
+        if (c.lastOutcome === 'failed') c.lastOutcome = null;
+        log(s, s.story);
+        break;
+      }
+      // Legacy tools may still send these navigation actions. They never consume resources or roll encounters.
+      case 'market':
       case 'leave':
-        if (s.phase !== 'market') throw Error('你不在市场');
+        requireDay(s);
         s.phase = 'day';
-        s.story = '你收好钱袋，离开州桥市。';
+        break;
+      case 'trade':
+        performTrade(s, action);
+        s.phase = 'day';
         finishAction(s);
         break;
-      case 'trade': {
-        if (s.phase !== 'market' || s.event) throw Error('请先进入市场');
-        const q = action.quantity,
-          g = action.good;
-        if (
-          !['buy', 'sell'].includes(action.side) ||
-          !GOOD_IDS.includes(g) ||
-          !Number.isFinite(q) ||
-          q <= 0 ||
-          q > 100000 ||
-          Math.abs(q * 10 - Math.round(q * 10)) > 1e-8 ||
-          (g !== 'grain' && !Number.isInteger(q))
-        )
-          throw Error('数量须为正数；粟米可输入一位小数');
-        const costStamina = tradeStamina(s, g, q);
-        if (s.stamina < costStamina) throw Error(`搬运需要${costStamina}体力`);
-        const p = quote(s, g),
-          u = Math.round(q * 10);
-        if (action.side === 'buy') {
-          const cost = Math.ceil(p.buy * q);
-          if (s.cash < cost) throw Error('现金不足');
-          if (g === 'hen') {
-            if (s.hens.length + q > henCapacity(s))
-              throw Error('当前养殖容量不足');
-            for (let i = 0; i < q; i++)
-              s.hens.push({ id: s.nextId++, hunger: 0, cost: p.buy });
-          } else {
-            if (reserved(s) + u > capacity(s)) throw Error('仓储容量不足');
-            add(s, g, u, cost, 'buy');
-          }
-          money(s, -cost, `买入${GOODS[g].name} ×${q}`);
-          s.ledger.purchases += cost;
-        } else {
-          if (quantity(s, g) < q) throw Error('货物不足');
-          const income = Math.floor(p.sell * q);
-          if (g === 'hen') {
-            const cost = s.hens.splice(0, q).reduce((a, h) => a + h.cost, 0);
-            s.stats.profit += income - cost;
-            s.ledger.tradeCost += cost;
-          } else {
-            const c = consume(s, g, u);
-            s.ledger.tradeCost += c.cost - c.productionCost;
-            if (c.production) {
-              s.stats.productionCostSold += c.productionCost;
-              s.ledger.productionCost += c.productionCost;
-              s.ledger.productionRevenue += Math.floor(
-                (income * c.production) / u,
-              );
-            } else s.stats.profit += income - c.cost;
-          }
-          money(s, income, `卖出${GOODS[g].name} ×${q}`);
-          const produced =
-            g === 'hen'
-              ? 0
-              : state.batches
-                  .filter((b) => b.good === g && b.origin === 'production')
-                  .reduce((v, b) => v + b.units, 0);
-          // The split uses the exact FIFO batch mix, including gifted inventory.
-          const soldMix =
-            g === 'hen' ? 0 : consume(structuredClone(state), g, u).production;
-          s.ledger.tradeRevenue +=
-            income - (produced ? Math.floor((income * soldMix) / u) : 0);
-        }
-        s.stamina -= costStamina;
-        s.daily.tradeUnits += q * (g === 'hen' ? 2 : RULES.tradeStaminaPerUnit);
-        s.stats.trades++;
-        s.stats.maxProfit = Math.max(s.stats.maxProfit, s.stats.profit);
-        s.story = `成交${GOODS[g].name} ×${q}，搬运消耗${costStamina}体力。`;
+      case 'refill': {
+        requireDay(s);
+        const plan = recipeQuote(s, action.recipeId, action.quantity);
+        if (!plan.materials.some((m) => m.missing > 0))
+          throw Error('原料已齐，可以直接开工');
+        for (const m of plan.materials)
+          if (m.missing > 0)
+            performTrade(s, {
+              type: 'trade',
+              side: 'buy',
+              good: m.good,
+              quantity: m.missing,
+            });
+        s.story = `${RECIPE_MAP[action.recipeId].name}所缺原料已补齐，可以直接开工。`;
+        s.phase = 'day';
+        finishAction(s);
         break;
       }
       case 'tea': {
@@ -1036,15 +1439,36 @@ export function dispatch(
             candidates.push(t);
         let heardMarket = false;
         for (const t of candidates) {
-          const w = heardMarket ? undefined : s.worlds.find(
-            (x) => !x.heard && x.expected >= s.day && x.expected <= s.day + 14 &&
-              s.day - (s.intelSeen[`market:${x.family}`] ?? -99) >= 7,
-          );
+          const w = heardMarket
+            ? undefined
+            : s.worlds.find(
+                (x) =>
+                  !x.heard &&
+                  x.expected >= s.day &&
+                  x.expected <= s.day + 14 &&
+                  s.day - (s.intelSeen[`market:${x.family}`] ?? -99) >= 7,
+              );
           if (w) {
             heardMarket = true;
             s.intelSeen[`market:${w.family}`] = s.day;
           }
           addIntel(s, t, w);
+          const customer =
+            !w && t === candidates.at(-1) && s.day >= 4 && s.day % 7 === 0
+              ? customerOpportunity(s)
+              : undefined;
+          if (customer) {
+            const entry = s.intel[0];
+            delete entry.resolution;
+            entry.customerId = customer;
+            entry.title = `${CUSTOMERS[customer].name}正在找供货人`;
+            entry.source = CUSTOMERS[customer].name;
+            entry.category = '人物机会';
+            entry.semantic = `customer-intro:${customer}`;
+            entry.text = CUSTOMERS[customer].stories[0];
+            entry.status = 'new';
+            s.intelSeen[entry.semantic] = s.day;
+          }
         }
         s.story = `你在茶馆坐了一会儿，记下${candidates.length}条新情报。出处和细节各有分量，真假要等后续动静验证。`;
         finishAction(s);
@@ -1056,8 +1480,51 @@ export function dispatch(
         const entry = s.intel.find((i) => i.id === action.id);
         if (!entry) throw Error('这条情报已不在近期记录中');
         const asking = action.type === 'askIntel';
+        if (!asking && !entry.asked) throw Error('请先追问出处，再回访核对');
         if (asking ? entry.asked : entry.visited)
           throw Error('这次核对已经做过');
+        if (entry.customerId) {
+          const id = entry.customerId;
+          const customer = s.commerce.customers[id] ?? {
+            met: false,
+            visited: 0,
+            lastOutcome: null,
+          };
+          if (!asking && !customer.met) throw Error('请先追问并认识这位客户');
+          if (
+            !asking &&
+            customerStage(s, id) < 2 &&
+            customer.lastOutcome !== 'failed'
+          )
+            throw Error('先完成或处理该客户的订单，再来回访');
+          if (s.stamina < 5) throw Error('核对需要5体力');
+          s.stamina -= 5;
+          customer.met = true;
+          s.commerce.customers[id] = customer;
+          if (asking) {
+            entry.asked = true;
+            customer.visited = Math.max(1, customer.visited);
+          } else {
+            entry.visited = true;
+            if (customer.lastOutcome !== 'failed')
+              customer.visited = Math.min(
+                customerStage(s, id),
+                customer.visited + 1,
+              );
+          }
+          entry.followUp =
+            !asking && customer.lastOutcome === 'failed'
+              ? CUSTOMERS[id].failure
+              : CUSTOMERS[id].stories[
+                  asking ? 0 : Math.max(0, customer.visited - 1)
+                ];
+          if (!asking && customer.lastOutcome === 'failed')
+            customer.lastOutcome = null;
+          entry.status = 'confirmed';
+          s.story = entry.followUp;
+          log(s, s.story);
+          break;
+        }
         const w = s.worlds.find((w) => w.id === entry.worldId);
         if (!asking && entry.resolution && s.day < entry.resolution.due)
           throw Error(`第${entry.resolution.due}日起可回访`);
@@ -1080,6 +1547,16 @@ export function dispatch(
                 ? (entry.resolution?.clue ??
                   '消息来源已经离开，暂时找不到更多细节。')
                 : (entry.resolution?.text ?? '这条旧消息已经无从追索。');
+        if (!asking)
+          entry.status = entry.resolution
+            ? entry.resolution.happens
+              ? 'confirmed'
+              : 'wrong'
+            : w
+              ? s.day >= w.start && w.truth !== 'false'
+                ? 'confirmed'
+                : 'wrong'
+              : 'expired';
         s.story = entry.followUp;
         break;
       }
@@ -1384,7 +1861,20 @@ export function dispatch(
         s.story = '天色渐暗。请统一安排晚饭、住宿和喂鸡，夜间会一次结算。';
         break;
       case 'night':
+        if (action.feedAll && action.feed !== s.hens.length)
+          throw Error('喂全部时数量须与当前母鸡总数一致');
         settleNight(s, action);
+        s.nightPreference = {
+          meal: action.meal,
+          bed: action.bed,
+          feed: action.feed,
+          feedMode: action.feedAll ? 'all' : 'fixed',
+        };
+        break;
+      case 'returnDay':
+        if (s.phase !== 'night' || s.event) throw Error('当前不在夜间安排');
+        s.phase = 'day';
+        s.story = '夜尚未深，你决定先处理手头的经营。';
         break;
       case 'inspect': {
         if (!s.event) throw Error('没有待查问的遭遇');
@@ -1425,6 +1915,9 @@ export function dispatch(
       }
       case 'return':
         if (s.event) throw Error('请先处理遭遇');
+        if (returnTerms(s) && action.confirm !== returnTerms(s))
+          throw Error('请先确认放弃在途订单的损失');
+        for (const order of s.commerce.orders) failOrder(s, order);
         if (s.cash < s.target) throw Error(`归航需要${s.target}文现金`);
         s.beforeReturn = s.cash;
         money(s, -s.target, '支付归航费用');
@@ -1457,16 +1950,30 @@ export function dispatch(
       s.ending = 'death';
       s.deathCause = '健康耗尽';
     }
+    if (s.phase === 'ended')
+      for (const order of s.commerce.orders) failOrder(s, order);
+    updateMilestones(s);
     s.health = clamp(s.health, 0, 100);
     s.stamina = clamp(s.stamina, 0, staminaMax(s));
     s.stats.peakAssets = Math.max(s.stats.peakAssets, assets(s));
     s.stats.maxHens = Math.max(s.stats.maxHens, s.hens.length);
     refreshIntelStatuses(s);
     s.revision++;
-    s.lastResponse = operationResponse(state, s, action);
-    return { state: s };
+    const result = operationResult(state, s, action);
+    if (isOperatingAction(action)) {
+      s.lastResponse = operationResponse(state, s, action);
+      s.operationHistory = [...(state.operationHistory ?? []), result].slice(
+        -50,
+      );
+    }
+    return { state: s, result };
   } catch (e) {
-    return { state, error: e instanceof Error ? e.message : '操作失败' };
+    const error = e instanceof Error ? e.message : '操作失败';
+    return {
+      state,
+      error,
+      result: operationResult(state, state, action, error),
+    };
   }
 }
 function dispatchInPlace(s: GameState, a: Action) {
@@ -1499,6 +2006,89 @@ export function achievements(s: GameState) {
 export function readSave(raw: string): GameState {
   try {
     const s = JSON.parse(raw) as GameState;
+    if (s.saveRevision !== undefined && ![1, 2].includes(s.saveRevision))
+      throw Error();
+    s.saveRevision = 2;
+    s.operationHistory ??= [];
+    s.nightPreference ??= null;
+    if (!Array.isArray(s.operationHistory)) throw Error();
+    s.operationHistory = s.operationHistory.slice(-50);
+    for (const result of s.operationHistory) {
+      if (
+        !result ||
+        typeof result.title !== 'string' ||
+        typeof result.actionKey !== 'string' ||
+        typeof result.success !== 'boolean' ||
+        (result.depositLoss !== undefined &&
+          (!Number.isSafeInteger(result.depositLoss) ||
+            result.depositLoss < 0)) ||
+        !Number.isSafeInteger(result.id) ||
+        !Number.isSafeInteger(result.day) ||
+        (result.error !== undefined && typeof result.error !== 'string') ||
+        (result.workRemaining !== null &&
+          !Number.isSafeInteger(result.workRemaining)) ||
+        (result.sale !== null &&
+          result.sale !== undefined &&
+          ![result.sale.revenue, result.sale.cost, result.sale.profit].every(
+            Number.isFinite,
+          )) ||
+        (result.customers !== undefined &&
+          (!Array.isArray(result.customers) ||
+            result.customers.some(
+              (c) =>
+                !c ||
+                !CUSTOMER_IDS.includes(c.id) ||
+                !Number.isFinite(c.change),
+            ))) ||
+        (result.milestones !== undefined &&
+          (!Array.isArray(result.milestones) ||
+            result.milestones.some(
+              (id) => !MILESTONES.some((m) => m.id === id),
+            ))) ||
+        ![result.cash, result.health, result.stamina].every(Number.isFinite) ||
+        !Array.isArray(result.items) ||
+        result.items.some(
+          (i) => !GOOD_IDS.includes(i.good) || !Number.isFinite(i.quantity),
+        ) ||
+        !Array.isArray(result.skills) ||
+        result.skills.some(
+          (k) =>
+            !SKILL_IDS.includes(k.skill) ||
+            !Number.isFinite(k.xp) ||
+            !Number.isFinite(k.level),
+        ) ||
+        !Array.isArray(result.states) ||
+        result.states.some(
+          (b) => !(b.buff in BUFFS) || typeof b.active !== 'boolean',
+        ) ||
+        !Array.isArray(result.jobs) ||
+        result.jobs.some(
+          (j) => !RECIPE_MAP[j.recipeId] || !Number.isSafeInteger(j.readyDay),
+        ) ||
+        !Array.isArray(result.details) ||
+        result.details.some((d) => typeof d !== 'string')
+      )
+        throw Error();
+    }
+    if (
+      s.nightPreference &&
+      (!['bread', 'egg', 'saltedEgg', 'grain', 'diner', 'none'].includes(
+        s.nightPreference.meal,
+      ) ||
+        ![
+          'inn',
+          'temple',
+          'street',
+          'room',
+          'courtyard',
+          'yard',
+          'mansion',
+        ].includes(s.nightPreference.bed) ||
+        !['all', 'fixed'].includes(s.nightPreference.feedMode) ||
+        !Number.isSafeInteger(s.nightPreference.feed) ||
+        s.nightPreference.feed < 0)
+    )
+      throw Error();
     if (
       s.version === 2 &&
       s.rules === RULES.version &&
@@ -1513,6 +2103,13 @@ export function readSave(raw: string): GameState {
       );
       s.story =
         '旧局已保留，修正后的分类账从本日重新记账；历史资产和进度不变。';
+    }
+    s.ledger.depositsPaid ??= 0;
+    s.ledger.depositsReturned ??= 0;
+    s.ledger.depositLosses ??= 0;
+    if (!s.commerce) {
+      s.commerce = newCommerce(s);
+      updateMilestones(s);
     }
     s.intel = s.intel.filter(
       (i) => i.reportVersion === 2 || i.worldId !== undefined,
@@ -1543,6 +2140,7 @@ export function readSave(raw: string): GameState {
     };
     if (
       !shape(s, model) ||
+      !validCommerce(s) ||
       s.version !== 2 ||
       s.rules !== RULES.version ||
       ![3000, 30000].includes(s.target) ||
@@ -1579,6 +2177,7 @@ export function readSave(raw: string): GameState {
       )
     )
       throw Error();
+    if (s.phase === 'market') s.phase = 'day';
     return s;
   } catch {
     throw Error('存档损坏或版本不兼容，原存档未被覆盖。');

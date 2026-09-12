@@ -1,13 +1,29 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { GoodIcon, GameIcon, StatusIcon } from '@/components/game-icons';
+import {
+  useWorkspaceValue,
+  setWorkspacePreference,
+} from '@/hooks/use-workspace-value';
+import { ResourceDelta, celebration } from '@/components/game-feedback';
+import { actionKey, isOperatingAction } from '@/lib/game/feedback';
+import { orderTerms, returnTerms } from '@/lib/game/commerce';
+import { Orders, Growth } from '@/components/game-commerce';
+import { todayTasks, type TodayTask } from '@/lib/game/today';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipProvider,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Pagination } from '@/components/ui/pagination';
+import { PersistentAssets, RecordFeed } from '@/components/game-shell';
 import {
   newGame,
   dispatch,
@@ -25,6 +41,10 @@ import {
   productionPlan,
   actionPreview,
   henCapacity,
+  maximumTrade,
+  maximumProduction,
+  recipeQuote,
+  availableSurplus,
 } from '@/lib/game/engine';
 import {
   GOODS,
@@ -42,12 +62,22 @@ import {
   BUFFS,
 } from '@/lib/game/config';
 import { registerGameTools, type ModelContext } from '@/lib/game/webmcp';
-import type { Action, GameState, Good, Bed, Meal } from '@/lib/game/types';
+import type {
+  Action,
+  GameState,
+  Good,
+  Bed,
+  Meal,
+  OperationResult,
+  EquipmentKind,
+  Buff,
+} from '@/lib/game/types';
 
 const SAVE = 'bianliang-save-v2';
 const money = (n: number) => `${n.toLocaleString('zh-CN')}文`;
 const num = (n: number) => Math.round(n * 10) / 10;
 type Act = (a: Action) => void;
+const FeedbackContext = createContext<OperationResult | undefined>(undefined);
 type Props = { s: GameState; act: Act };
 const tabs = {
   market: '市场',
@@ -57,8 +87,12 @@ const tabs = {
   people: '人物',
   intel: '情报',
   ledger: '账本',
+  orders: '订单',
 };
 type Tab = keyof typeof tabs;
+const NavigationContext = createContext<(tab: Tab, good?: Good) => void>(
+  () => {},
+);
 function Btn({
   children,
   onClick,
@@ -80,41 +114,10 @@ function Btn({
     </Button>
   );
 }
-function Pager({
-  page,
-  total,
-  setPage,
-}: {
-  page: number;
-  total: number;
-  setPage: (v: number) => void;
-}) {
-  return (
-    <Pagination className="pager" aria-label="分页">
-      <Btn subtle disabled={page === 0} onClick={() => setPage(page - 1)}>
-        上一页
-      </Btn>
-      <span>
-        {page + 1} / {Math.max(1, total)}
-      </span>
-      <Btn
-        subtle
-        disabled={page + 1 >= total}
-        onClick={() => setPage(page + 1)}
-      >
-        下一页
-      </Btn>
-    </Pagination>
-  );
-}
-function TextPages({ text, size = 150 }: { text: string; size?: number }) {
-  const [page, setPage] = useState(0);
-  const count = Math.max(1, Math.ceil(text.length / size));
-  const index = Math.min(page, count - 1);
+function TextPages({ text }: { text: string; size?: number }) {
   return (
     <div className="text-pages">
-      <p>{text.slice(index * size, (index + 1) * size)}</p>
-      {count > 1 && <Pager page={index} total={count} setPage={setPage} />}
+      <p>{text}</p>
     </div>
   );
 }
@@ -125,6 +128,8 @@ function Do({
   children,
 }: Props & { action: Action; children: React.ReactNode }) {
   const p = actionPreview(s, action);
+  const latest = useContext(FeedbackContext);
+  const matched = latest?.actionKey === actionKey(action);
   return (
     <div className="action">
       <Btn disabled={!!p.error} onClick={() => act(action)}>
@@ -133,6 +138,11 @@ function Do({
       {p.energy > 0 && <small>{p.energy}体力</small>}
       {p.error && <small className="reason">{p.error}</small>}
       {!p.error && p.warning && <small className="reason">{p.warning}</small>}
+      {matched && (
+        <small className={latest.success ? 'inline-success' : 'reason'}>
+          {latest.success ? `✓ ${latest.title}` : latest.error}
+        </small>
+      )}
     </div>
   );
 }
@@ -156,16 +166,19 @@ function Frame({
   );
 }
 function Market({ s, act }: Props) {
-  const [category, setCategory] = useState('全部');
-  const [page, setPage] = useState(0);
-  const [good, setGood] = useState<Good>('grain');
-  const [count, setCount] = useState('1');
-  const [history, setHistory] = useState(false);
+  const [category, setCategory] = useWorkspaceValue<string>(
+    'market.category',
+    '全部',
+  );
+  const [good, setGood] = useWorkspaceValue<Good>('market.good', 'grain');
+  const [count, setCount] = useWorkspaceValue<string>('market.count', '1');
+  const [history, setHistory] = useWorkspaceValue<boolean>(
+    'market.history',
+    false,
+  );
   const list = GOOD_IDS.filter(
     (g) => category === '全部' || GOODS[g].category === category,
   );
-  const pages = Math.ceil(list.length / 4);
-  const ix = Math.min(page, pages - 1);
   const selected = list.includes(good) ? good : list[0];
   const g = GOODS[selected];
   const q = Number(count);
@@ -190,7 +203,6 @@ function Market({ s, act }: Props) {
             value={category}
             onChange={(e) => {
               setCategory(e.target.value);
-              setPage(0);
             }}
           >
             {['全部', ...new Set(GOOD_IDS.map((g) => GOODS[g].category))].map(
@@ -201,15 +213,6 @@ function Market({ s, act }: Props) {
           </select>
         </label>
         <span>累计搬运 {num(s.daily.tradeUnits)} 单位</span>
-        {s.phase === 'market' ? (
-          <Do s={s} act={act} action={{ type: 'leave' }}>
-            离开市场
-          </Do>
-        ) : (
-          <Do s={s} act={act} action={{ type: 'market' }}>
-            进入市场
-          </Do>
-        )}
       </div>
       <div className="split">
         <div className="list-column">
@@ -218,7 +221,7 @@ function Market({ s, act }: Props) {
             <span>买 / 卖 · 较昨日</span>
           </div>
           <div className="item-list">
-            {list.slice(ix * 4, ix * 4 + 4).map((id) => {
+            {list.map((id) => {
               const price = quote(s, id);
               const prev = s.history.at(-2)?.prices[id].buy;
               const change = prev
@@ -231,7 +234,10 @@ function Market({ s, act }: Props) {
                   onClick={() => selectGood(id)}
                 >
                   <span>
-                    <strong>{GOODS[id].name}</strong>
+                    <strong className="icon-label">
+                      <GoodIcon good={id} />
+                      {GOODS[id].name}
+                    </strong>
                     <small>
                       持有 {num(quantity(s, id))} {GOODS[id].unit}
                     </small>
@@ -247,11 +253,13 @@ function Market({ s, act }: Props) {
               );
             })}
           </div>
-          <Pager page={ix} total={pages} setPage={setPage} />
         </div>
-        <aside className="detail">
+        <aside className="detail market-detail">
           <div className="detail-head">
-            <h2>{g.name}</h2>
+            <h2 className="icon-label">
+              <GoodIcon good={selected} large />
+              {g.name}
+            </h2>
             <Btn subtle onClick={() => setHistory(!history)}>
               {history ? '交易详情' : '价格记录'}
             </Btn>
@@ -298,6 +306,44 @@ function Market({ s, act }: Props) {
                   onChange={(e) => setCount(e.target.value)}
                 />
               </label>
+              <div className="quick-quantity" aria-label="交易快捷数量">
+                {[1, 5, 10].map((n) => (
+                  <Btn key={n} subtle onClick={() => setCount(String(n))}>
+                    {n}
+                  </Btn>
+                ))}
+                <Btn
+                  subtle
+                  onClick={() =>
+                    setCount(String(maximumTrade(s, selected, 'buy')))
+                  }
+                >
+                  最大买入
+                </Btn>
+                <Btn
+                  subtle
+                  onClick={() =>
+                    setCount(String(maximumTrade(s, selected, 'sell')))
+                  }
+                >
+                  最大卖出
+                </Btn>
+                <Btn
+                  subtle
+                  onClick={() =>
+                    setCount(
+                      String(
+                        Math.min(
+                          availableSurplus(s, selected),
+                          maximumTrade(s, selected, 'sell'),
+                        ),
+                      ),
+                    )
+                  }
+                >
+                  保留口粮饲料
+                </Btn>
+              </div>
               <div className="estimate">
                 买入 {money(Number.isFinite(q) ? Math.ceil(p.buy * q) : 0)} ·
                 卖出 {money(Number.isFinite(q) ? Math.floor(p.sell * q) : 0)}
@@ -343,10 +389,14 @@ function Market({ s, act }: Props) {
   );
 }
 function Production({ s, act }: Props) {
-  const [mode, setMode] = useState('配方');
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState('flour');
-  const [count, setCount] = useState('1');
+  const navigate = useContext(NavigationContext);
+  const [mode, setMode] = useWorkspaceValue<string>('production.mode', '配方');
+  const [selected, setSelected] = useWorkspaceValue<string>(
+    'production.selected',
+    'flour',
+  );
+  const [count, setCount] = useWorkspaceValue<string>('production.count', '1');
+  const [details, setDetails] = useState(false);
   const queue = s.jobs.filter((j) => j.status === 'queued');
   const items =
     mode === '配方'
@@ -370,15 +420,18 @@ function Production({ s, act }: Props) {
             name: RECIPES.find((r) => r.id === j.recipeId)!.name,
             detail: `${s.equipment.find((e) => e.id === j.equipmentId)?.installed ? '第' + j.readyDay + '日完成' : '封存暂停'}`,
           }));
-  const ix = Math.min(page, Math.max(0, Math.ceil(items.length / 5) - 1));
-  const id = items.some((x) => x.id === selected)
-    ? selected
-    : items[ix * 5]?.id;
+  const id = items.some((x) => x.id === selected) ? selected : items[0]?.id;
   const r = RECIPES.find((r) => r.id === id);
   const eq = s.equipment.find((e) => e.kind === id);
   const kind = EQUIPMENT_IDS.find((k) => k === id);
   const job = queue.find((j) => String(j.id) === id);
   const plan = r ? productionPlan(s, r, Number(count)) : null;
+  let costing: ReturnType<typeof recipeQuote> | null = null;
+  try {
+    if (r) costing = recipeQuote(s, r.id, Number(count));
+  } catch {
+    /* Quantity validation is shown next to actions. */
+  }
   return (
     <Frame title="作坊" note="设备、配方和在制品集中管理。">
       <div className="toolbar">
@@ -388,7 +441,6 @@ function Production({ s, act }: Props) {
             subtle={mode !== x}
             onClick={() => {
               setMode(x);
-              setPage(0);
               setSelected('');
             }}
           >
@@ -400,7 +452,7 @@ function Production({ s, act }: Props) {
       <div className="split">
         <div className="list-column">
           <div className="item-list">
-            {items.slice(ix * 5, ix * 5 + 5).map((x) => (
+            {items.map((x) => (
               <button
                 key={x.id}
                 className={`list-item ${x.id === id ? 'selected' : ''}`}
@@ -409,85 +461,193 @@ function Production({ s, act }: Props) {
                   setCount('1');
                 }}
               >
-                <strong>{x.name}</strong>
+                <strong className="icon-label">
+                  {mode === '设备' ? (
+                    <GameIcon kind={x.id as EquipmentKind} />
+                  ) : (
+                    <GoodIcon
+                      good={
+                        RECIPES.find((r) => r.id === x.id)?.output ??
+                        RECIPES.find(
+                          (r) =>
+                            r.id ===
+                            queue.find((j) => String(j.id) === x.id)?.recipeId,
+                        )?.output ??
+                        'flour'
+                      }
+                    />
+                  )}{' '}
+                  {x.name}
+                </strong>
                 <small>{x.detail}</small>
               </button>
             ))}
             {!items.length && <p>没有在制品。当日配方完成后直接入库。</p>}
           </div>
-          <Pager
-            page={ix}
-            total={Math.ceil(items.length / 5)}
-            setPage={setPage}
-          />
         </div>
-        <aside className="detail">
+        <aside className="detail production-detail">
           {mode === '配方' && r && plan && (
             <>
-              <h2>{r.name}</h2>
-              <p>{r.batchLabel}</p>
-              <dl className="facts">
-                <div>
-                  <dt>所需设备 / 技能</dt>
-                  <dd>
-                    {EQUIPMENT[r.equipment].name} / {SKILL_LEVELS[r.minSkill]}
-                  </dd>
-                </div>
-                <div>
-                  <dt>用时 / 保质期</dt>
-                  <dd>
-                    {r.duration ? `${r.duration}夜` : '当日'} /{' '}
-                    {r.shelfLife ? `${r.shelfLife}日` : '无固定到期日'}
-                  </dd>
-                </div>
-              </dl>
-              <label className="quantity">
-                加工批量
-                <input
-                  aria-label={`${r.name}批量`}
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={count}
-                  onChange={(e) => setCount(e.target.value)}
-                />
-              </label>
-              <p className="estimate">
-                本次投入：
-                {Object.entries(plan.inputs)
-                  .map(([g, u]) => `${GOODS[g as Good].name}${num(u! / 10)}`)
-                  .join('、')}
-                <br />
-                产出：{GOODS[r.output].name}
-                {num(plan.outputUnits / 10)}；预计毛利{' '}
-                {money(
-                  Math.floor(
-                    (quote(s, r.output).sell * plan.outputUnits) / 10,
-                  ) -
-                    Object.entries(plan.inputs).reduce(
-                      (a, [g, u]) =>
-                        a + Math.ceil((quote(s, g as Good).buy * u!) / 10),
-                      0,
-                    ),
-                )}
-                （按现价购料）
-              </p>
-              <Do
-                s={s}
-                act={act}
-                action={{
-                  type: 'produce',
-                  recipeId: r.id,
-                  quantity: Number(count),
-                }}
-              >
-                开工
-              </Do>
+              <div className="detail-head">
+                <h2 className="icon-label">
+                  <GoodIcon good={r.output} />
+                  {r.name}
+                </h2>
+                <Btn subtle onClick={() => setDetails(!details)}>
+                  {details ? '返回备料' : '成本明细'}
+                </Btn>
+              </div>
+              {details ? (
+                <>
+                  <p>毛利不含生活、住房、学费等费用。</p>
+                  {costing && (
+                    <dl className="facts">
+                      <div>
+                        <dt>库存实际成本毛利</dt>
+                        <dd>
+                          {costing.stockProfit === null
+                            ? '库存不足，无法完整计算'
+                            : money(costing.stockProfit)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>补齐缺料后毛利</dt>
+                        <dd>{money(costing.refillProfit)}</dd>
+                      </div>
+                      <div>
+                        <dt>全部现价购料毛利</dt>
+                        <dd>{money(costing.replacementProfit)}</dd>
+                      </div>
+                      <div>
+                        <dt>开工体力 / 设备</dt>
+                        <dd>
+                          {costing.energy} / {EQUIPMENT[r.equipment].name}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                  <p>
+                    {r.duration
+                      ? '按今日售价估算，完工时售价可能变化。'
+                      : '按当前售价估算，实际出售时结算。'}
+                  </p>
+                  <p>
+                    {r.duration
+                      ? '占用设备' + r.duration + '夜'
+                      : '当日完成，设备可继续使用'}
+                    ；保质期{r.shelfLife ? r.shelfLife + '日' : '无限制'}。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <small>
+                    {EQUIPMENT[r.equipment].name} · {SKILL_LEVELS[r.minSkill]} ·{' '}
+                    {r.duration ? r.duration + '夜' : '当日完成'} · 保质
+                    {r.shelfLife ? r.shelfLife + '日' : '无限制'}
+                  </small>
+                  <label className="quantity">
+                    加工批量
+                    <input
+                      aria-label={r.name + '批量'}
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={count}
+                      onChange={(e) => setCount(e.target.value)}
+                    />
+                  </label>
+                  <div className="quick-quantity">
+                    <Btn subtle onClick={() => setCount('1')}>
+                      1批
+                    </Btn>
+                    <Btn subtle onClick={() => setCount('5')}>
+                      5批
+                    </Btn>
+                    <Btn
+                      subtle
+                      onClick={() =>
+                        setCount(String(maximumProduction(s, r.id)))
+                      }
+                    >
+                      当前最多可做
+                    </Btn>
+                  </div>
+                  {costing && (
+                    <>
+                      <table className="material-table">
+                        <thead>
+                          <tr>
+                            <th>原料</th>
+                            <th>已有</th>
+                            <th>需要</th>
+                            <th>缺少</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {costing.materials.map((m) => (
+                            <tr key={m.good}>
+                              <td>
+                                <GoodIcon good={m.good} />
+                                {GOODS[m.good].name}
+                              </td>
+                              <td>{num(m.owned)}</td>
+                              <td>{num(m.needed)}</td>
+                              <td>{num(m.missing)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <small>
+                        补料{money(costing.refillCost)} · 搬运{costing.carrying}
+                        体力 · 余款{money(s.cash - costing.refillCost)}
+                      </small>
+                      <p className="estimate">
+                        产出{GOODS[r.output].name}
+                        {num(plan.outputUnits / 10)} · 预计毛利
+                        {money(costing.refillProfit)}
+                        {r.duration ? '（按今日售价）' : ''}
+                      </p>
+                    </>
+                  )}
+                  <div className="actions production-actions">
+                    {costing?.materials.some((m) => m.missing > 0) && (
+                      <Do
+                        s={s}
+                        act={act}
+                        action={{
+                          type: 'refill',
+                          recipeId: r.id,
+                          quantity: Number(count),
+                        }}
+                      >
+                        补齐原料
+                      </Do>
+                    )}
+                    <Do
+                      s={s}
+                      act={act}
+                      action={{
+                        type: 'produce',
+                        recipeId: r.id,
+                        quantity: Number(count),
+                      }}
+                    >
+                      开工
+                    </Do>
+                    <Btn subtle onClick={() => navigate('market', r.output)}>
+                      出售成品
+                    </Btn>
+                  </div>
+                </>
+              )}
             </>
           )}
           {mode === '设备' && kind && (
             <>
-              <h2>{EQUIPMENT[kind].name}</h2>
+              <h2 className="icon-label">
+                <GameIcon kind={kind} large />
+                {EQUIPMENT[kind].name}
+              </h2>
               <p>{EQUIPMENT[kind].detail}</p>
               <p>
                 占用1个设备位 · 购置{money(EQUIPMENT[kind].cost)} · 出售
@@ -552,7 +712,7 @@ function Production({ s, act }: Props) {
   );
 }
 function Housing({ s, act }: Props) {
-  const [id, setId] = useState(s.housing.id);
+  const [id, setId] = useWorkspaceValue('housing.id', s.housing.id);
   const h = HOUSING[id];
   return (
     <Frame
@@ -568,7 +728,10 @@ function Housing({ s, act }: Props) {
                 className={`list-item ${id === x ? 'selected' : ''}`}
                 onClick={() => setId(x)}
               >
-                <strong>{HOUSING[x].name}</strong>
+                <strong className="icon-label">
+                  <GameIcon kind={x} />
+                  {HOUSING[x].name}
+                </strong>
                 <small>
                   {x === s.housing.id
                     ? '当前住所'
@@ -583,7 +746,10 @@ function Housing({ s, act }: Props) {
           </div>
         </div>
         <aside className="detail">
-          <h2>{h.name}</h2>
+          <h2 className="icon-label">
+            <GameIcon kind={id} large />
+            {h.name}
+          </h2>
           <p>{h.detail}</p>
           <dl className="facts">
             <div>
@@ -642,8 +808,9 @@ function Housing({ s, act }: Props) {
   );
 }
 function People({ s, act }: Props) {
-  const [id, setId] = useState('身体');
+  const [id, setId] = useWorkspaceValue<string>('people.id', '身体');
   const skill = SKILL_IDS.find((k) => k === id);
+  if (id === '成长') return <Growth s={s} onBack={() => setId('身体')} />;
   return (
     <Frame
       title="人物与手艺"
@@ -667,7 +834,10 @@ function People({ s, act }: Props) {
                 className={`list-item ${id === k ? 'selected' : ''}`}
                 onClick={() => setId(k)}
               >
-                <strong>{SKILLS[k].name}</strong>
+                <strong className="icon-label">
+                  <GameIcon kind={k} />
+                  {SKILLS[k].name}
+                </strong>
                 <small>
                   {SKILL_LEVELS[s.skills[k]]} · {s.skillXp[k]}批经验
                 </small>
@@ -678,7 +848,10 @@ function People({ s, act }: Props) {
         <aside className="detail">
           {skill ? (
             <>
-              <h2>{SKILLS[skill].name}</h2>
+              <h2 className="icon-label">
+                <GameIcon kind={skill} large />
+                {SKILLS[skill].name}
+              </h2>
               <p>
                 {SKILLS[skill].teacher}：{SKILLS[skill].detail}
               </p>
@@ -701,7 +874,12 @@ function People({ s, act }: Props) {
             </>
           ) : (
             <>
-              <h2>照料自己</h2>
+              <div className="detail-head">
+                <h2>照料自己</h2>
+                <Btn subtle onClick={() => setId('成长')}>
+                  经营成长
+                </Btn>
+              </div>
               <div className="care-grid">
                 <Do s={s} act={act} action={{ type: 'short' }}>
                   短工 · 25文
@@ -733,14 +911,19 @@ function People({ s, act }: Props) {
   );
 }
 function Intel({ s, act }: Props) {
-  const [category, setCategory] = useState('全部');
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState('');
+  const navigate = useContext(NavigationContext);
+  const [category, setCategory] = useWorkspaceValue<string>(
+    'intel.category',
+    '全部',
+  );
+  const [selected, setSelected] = useWorkspaceValue<string>(
+    'intel.selected',
+    '',
+  );
   const entries = s.intel.filter(
     (i) => category === '全部' || i.category === category,
   );
-  const ix = Math.min(page, Math.max(0, Math.ceil(entries.length / 4) - 1));
-  const i = entries.find((i) => i.id === selected) ?? entries[ix * 4];
+  const i = entries.find((i) => i.id === selected) ?? entries[0];
   return (
     <Frame
       title="茶馆与市井"
@@ -757,7 +940,6 @@ function Intel({ s, act }: Props) {
             value={category}
             onChange={(e) => {
               setCategory(e.target.value);
-              setPage(0);
               setSelected('');
             }}
           >
@@ -770,7 +952,7 @@ function Intel({ s, act }: Props) {
       <div className="split">
         <div className="list-column">
           <div className="item-list">
-            {entries.slice(ix * 4, ix * 4 + 4).map((e) => (
+            {entries.map((e) => (
               <button
                 key={e.id}
                 className={`list-item ${i?.id === e.id ? 'selected' : ''}`}
@@ -780,11 +962,15 @@ function Intel({ s, act }: Props) {
                   <strong>{e.title ?? `${e.category} · ${e.source}`}</strong>
                   <small>
                     {e.source} · 第{e.heardDay}日 ·{' '}
-                    {e.worldId ? '行情线索' : '市井见闻'}
+                    {e.customerId
+                      ? '人物供货机会'
+                      : e.worldId
+                        ? '行情线索'
+                        : '市井见闻'}
                   </small>
                 </span>
                 <small>
-                  {e.status === 'new'
+                  {!e.visited || e.status === 'new'
                     ? '待验证'
                     : e.status === 'confirmed'
                       ? '已有后续'
@@ -798,22 +984,24 @@ function Intel({ s, act }: Props) {
               <p>还没有这一类消息。每天可在茶馆听取三条不同题材的内容。</p>
             )}
           </div>
-          <Pager
-            page={ix}
-            total={Math.ceil(entries.length / 4)}
-            setPage={(v) => {
-              setPage(v);
-              setSelected('');
-            }}
-          />
         </div>
         <aside className="detail">
           {i ? (
             <>
               <h2>{i.source}的消息</h2>
+              {i.customerId && (
+                <Btn subtle onClick={() => navigate('orders')}>
+                  查看供货订单
+                </Btn>
+              )}
               <TextPages
                 key={i.id}
-                text={i.text + (i.followUp ? `\n核对：${i.followUp}` : '')}
+                text={
+                  i.text +
+                  ((i.asked || i.visited) && i.followUp
+                    ? `\n${i.visited ? '核对结果' : '追问所得'}：${i.followUp}`
+                    : '')
+                }
                 size={160}
               />
               <div className="actions">
@@ -834,9 +1022,14 @@ function Intel({ s, act }: Props) {
   );
 }
 function Assets({ s }: Props) {
-  const [category, setCategory] = useState('货物');
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState('');
+  const [category, setCategory] = useWorkspaceValue<string>(
+    'assets.category',
+    '货物',
+  );
+  const [selected, setSelected] = useWorkspaceValue<string>(
+    'assets.selected',
+    '',
+  );
   const goods = GOOD_IDS.filter((g) => quantity(s, g) > 0);
   const rows =
     category === '货物'
@@ -872,8 +1065,7 @@ function Assets({ s }: Props) {
                 },
               ]
             : [];
-  const index = Math.min(page, Math.max(0, Math.ceil(rows.length / 4) - 1));
-  const chosen = rows.find((r) => r.id === selected) ?? rows[index * 4];
+  const chosen = rows.find((r) => r.id === selected) ?? rows[0];
   const good = category === '货物' && chosen ? (chosen.id as Good) : null;
   const eq =
     category === '设备'
@@ -898,7 +1090,7 @@ function Assets({ s }: Props) {
   return (
     <Frame
       title="我的资产"
-      note={`现金 ${money(s.cash)} · 货物估值 ${money(goodsValue)} · 设备/房产回收价 ${money(equipmentValue + propertyValue)}`}
+      note={`现金 ${money(s.cash)} · 冻结保证金 ${money(s.commerce.orders.filter((o) => o.status === 'accepted').reduce((n, o) => n + o.deposit, 0))} · 货物估值 ${money(goodsValue)} · 设备/房产回收价 ${money(equipmentValue + propertyValue)}`}
     >
       <div className="toolbar">
         {['货物', '在制品', '设备', '房产'].map((c) => (
@@ -907,7 +1099,6 @@ function Assets({ s }: Props) {
             subtle={category !== c}
             onClick={() => {
               setCategory(c);
-              setPage(0);
               setSelected('');
             }}
           >
@@ -918,14 +1109,25 @@ function Assets({ s }: Props) {
       <div className="split">
         <div className="list-column">
           <div className="item-list">
-            {rows.slice(index * 4, index * 4 + 4).map((r) => (
+            {rows.map((r) => (
               <button
                 key={r.id}
                 className={`list-item ${chosen?.id === r.id ? 'selected' : ''}`}
                 onClick={() => setSelected(r.id)}
               >
                 <span>
-                  <strong>{r.name}</strong>
+                  <strong className="icon-label">
+                    {category === '货物' && <GoodIcon good={r.id as Good} />}
+                    {category === '设备' && (
+                      <GameIcon
+                        kind={
+                          s.equipment.find((e) => String(e.id) === r.id)!.kind
+                        }
+                      />
+                    )}
+                    {category === '房产' && <GameIcon kind={s.housing.id} />}{' '}
+                    {r.name}
+                  </strong>
                   <small>{r.summary}</small>
                 </span>
                 <span>{money(r.value)}</span>
@@ -940,14 +1142,6 @@ function Assets({ s }: Props) {
               </p>
             )}
           </div>
-          <Pager
-            page={index}
-            total={Math.ceil(rows.length / 4)}
-            setPage={(v) => {
-              setPage(v);
-              setSelected('');
-            }}
-          />
         </div>
         <aside className="detail">
           <h2>{chosen?.name ?? '资产说明'}</h2>
@@ -1032,53 +1226,62 @@ function Assets({ s }: Props) {
   );
 }
 function StatusEffects({ s }: { s: GameState }) {
-  const [page, setPage] = useState(0);
-  const effects = Object.keys(BUFFS)
-    .filter((k) => active(s, k as keyof typeof BUFFS))
-    .map((k) => {
-      const b = BUFFS[k as keyof typeof BUFFS];
-      return { name: b.name, detail: b.detail };
-    });
-  if (s.housing.maintenanceSuspended)
-    effects.push({
-      name: '维护暂停',
-      detail: '住宅恢复加成和新开工暂停，补缴后恢复。',
-    });
-  const index = Math.min(page, Math.max(0, effects.length - 1));
+  const effects = (
+    ['cold', 'tired', 'outsider', 'regular', 'warm'] as Buff[]
+  ).filter((k) => active(s, k));
   return (
     <div className="status-effects">
-      <span>
-        当前状态{effects.length > 1 ? ` · ${index + 1}/${effects.length}` : ''}
-      </span>
-      <strong>{effects[index]?.name ?? '平稳'}</strong>
-      <small>{effects[index]?.detail ?? '没有额外状态影响。'}</small>
-      {effects.length > 1 && (
-        <div className="effect-controls">
-          <button
-            aria-label="上一个状态"
-            onClick={() =>
-              setPage((index + effects.length - 1) % effects.length)
-            }
-          >
-            ‹
-          </button>
-          <button
-            aria-label="下一个状态"
-            onClick={() => setPage((index + 1) % effects.length)}
-          >
-            ›
-          </button>
+      <span>当前状态</span>
+      <TooltipProvider>
+        <div className="status-tags">
+          {effects.map((k) => (
+            <Tooltip key={k}>
+              <TooltipTrigger
+                className="status-tag"
+                aria-describedby={`status-help-${k}`}
+              >
+                {BUFFS[k].name}
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="status-explanation"
+                role="tooltip"
+                id={`status-help-${k}`}
+              >
+                {BUFFS[k].detail}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+          {s.housing.maintenanceSuspended && (
+            <Tooltip>
+              <TooltipTrigger
+                className="status-tag"
+                aria-describedby="status-help-maintenance"
+              >
+                维护暂停
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="status-explanation"
+                role="tooltip"
+                id="status-help-maintenance"
+              >
+                补缴维护后恢复生产
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {!effects.length && !s.housing.maintenanceSuspended && (
+            <span>平稳 · 无异常</span>
+          )}
         </div>
-      )}
+      </TooltipProvider>
     </div>
   );
 }
 
 function Ledger({ s }: Props) {
-  const [page, setPage] = useState(0);
   const l = s.ledger;
   const logs = [...s.logs].reverse();
-  const ix = Math.min(page, Math.max(0, Math.ceil(logs.length / 3) - 1));
   return (
     <Frame
       title="账本"
@@ -1096,6 +1299,17 @@ function Ledger({ s }: Props) {
             ['住宅 / 生活', `${money(l.housing)} / ${money(l.living)}`],
             ['饲料 / 医疗', `${money(l.feed)} / ${money(l.medical)}`],
             ['损耗', l.losses],
+            [
+              '冻结保证金',
+              s.commerce.orders
+                .filter((o) => o.status === 'accepted')
+                .reduce((n, o) => n + o.deposit, 0),
+            ],
+            [
+              '保证金缴付 / 返还',
+              `${money(l.depositsPaid)} / ${money(l.depositsReturned)}`,
+            ],
+            ['违约损失', l.depositLosses],
           ].map(([k, v]) => (
             <div key={k}>
               <span>{k}</span>
@@ -1106,7 +1320,7 @@ function Ledger({ s }: Props) {
         <aside className="detail">
           <h2>近期流水</h2>
           <div className="log-list">
-            {logs.slice(ix * 3, ix * 3 + 3).map((x) => (
+            {logs.map((x) => (
               <div className="log" key={x.id}>
                 <small>
                   第{x.day}日 {x.cash ? money(x.cash) : ''}
@@ -1118,28 +1332,52 @@ function Ledger({ s }: Props) {
               </div>
             ))}
           </div>
-          <Pager
-            page={ix}
-            total={Math.ceil(logs.length / 3)}
-            setPage={setPage}
-          />
         </aside>
       </div>
     </Frame>
   );
 }
 function Night({ s, act }: Props) {
+  const [risksOpen, setRisksOpen] = useState(false);
+  const risks = [
+    ...s.commerce.orders
+      .filter((o) => o.status === 'accepted' && o.deadline <= s.day)
+      .map(
+        (o) =>
+          `订单「${o.title}」今夜将违约：没收保证金${o.deposit}文，客户关系−${o.highRisk ? 2 : 1}。`,
+      ),
+    ...GOOD_IDS.filter((g) =>
+      s.batches.some(
+        (b) => b.good === g && b.expires !== null && b.expires <= s.day,
+      ),
+    ).map((g) => `${GOODS[g].name}有临期批次，今夜结束时将丢弃。`),
+  ];
   const [meal, setMeal] = useState<Meal>(
-    quantity(s, 'bread') >= 1 ? 'bread' : 'diner',
+    s.nightPreference?.meal ?? (quantity(s, 'bread') >= 1 ? 'bread' : 'diner'),
   );
   const [bed, setBed] = useState<Bed>(
-    s.housing.id === 'street' ? 'inn' : s.housing.id,
+    s.nightPreference?.bed ??
+      (s.housing.id === 'street' ? 'inn' : s.housing.id),
   );
-  const [feed, setFeed] = useState(String(s.hens.length));
+  const [feedAll, setFeedAll] = useState(
+    s.nightPreference?.feedMode !== 'fixed',
+  );
+  const [feed, setFeed] = useState(
+    String(
+      s.nightPreference?.feedMode === 'fixed'
+        ? s.nightPreference.feed
+        : s.hens.length,
+    ),
+  );
   let p;
   let error = '';
   try {
-    p = nightPreview(s, { type: 'night', meal, bed, feed: Number(feed) });
+    p = nightPreview(s, {
+      type: 'night',
+      meal,
+      bed,
+      feed: feedAll ? s.hens.length : Number(feed),
+    });
   } catch (e) {
     error = (e as Error).message;
   }
@@ -1175,6 +1413,12 @@ function Night({ s, act }: Props) {
               value={bed}
               onChange={(e) => setBed(e.target.value as Bed)}
             >
+              {!['inn', 'temple', 'street', s.housing.id].includes(bed) && (
+                <option value={bed} disabled>
+                  {HOUSING[bed as keyof typeof HOUSING]?.name ?? bed}
+                  （已不可用，请重选）
+                </option>
+              )}
               {[
                 ['inn', '客栈 · 30文'],
                 ['temple', '庙廊 · 免费 / 有失窃风险'],
@@ -1196,9 +1440,20 @@ function Night({ s, act }: Props) {
               type="number"
               min="0"
               max={s.hens.length}
-              value={feed}
-              onChange={(e) => setFeed(e.target.value)}
+              value={feedAll ? s.hens.length : feed}
+              onChange={(e) => {
+                setFeed(e.target.value);
+                setFeedAll(false);
+              }}
             />
+          </label>
+          <label className="feed-all">
+            <input
+              type="checkbox"
+              checked={feedAll}
+              onChange={(e) => setFeedAll(e.target.checked)}
+            />
+            每天喂全部母鸡
           </label>
           <small>
             当前{s.hens.length}
@@ -1206,7 +1461,14 @@ function Night({ s, act }: Props) {
           </small>
         </div>
         <aside className="detail">
-          <h2>今晚的账</h2>
+          <div className="detail-head">
+            <h2>今晚的账</h2>
+            {risks.length > 0 && (
+              <Btn subtle onClick={() => setRisksOpen(true)}>
+                到期提醒 ({risks.length})
+              </Btn>
+            )}
+          </div>
           {p ? (
             <>
               <dl className="facts">
@@ -1251,19 +1513,41 @@ function Night({ s, act }: Props) {
           <Do
             s={s}
             act={act}
-            action={{ type: 'night', meal, bed, feed: Number(feed) }}
+            action={{
+              type: 'night',
+              meal,
+              bed,
+              feed: feedAll ? s.hens.length : Number(feed),
+              feedAll,
+            }}
           >
             安排妥当，度过这一夜 →
           </Do>
+          <Do s={s} act={act} action={{ type: 'returnDay' }}>
+            返回白天处理
+          </Do>
         </aside>
       </div>
+      <Dialog open={risksOpen} onOpenChange={setRisksOpen}>
+        <DialogContent className="confirm">
+          <DialogTitle>今晚到期提醒</DialogTitle>
+          <DialogDescription>先查看损失，再决定是否过夜。</DialogDescription>
+          <TextPages text={risks.join(' ')} size={160} />
+          <Btn
+            onClick={() => {
+              setRisksOpen(false);
+              act({ type: 'returnDay' });
+            }}
+          >
+            返回白天处理
+          </Btn>
+        </DialogContent>
+      </Dialog>
     </Frame>
   );
 }
 function Encounter({ s, act }: Props) {
-  const [page, setPage] = useState(0);
   const e = s.event!;
-  const c = e.choices[Math.min(page, e.choices.length - 1)];
   return (
     <Frame title={e.title} note="先读经过和线索，再选择如何回应。">
       <div className="split">
@@ -1283,16 +1567,21 @@ function Encounter({ s, act }: Props) {
         </div>
         <aside className="detail">
           <h2>你的回应</h2>
-          <TextPages text={c.hint} size={100} />
-          <p>现金消耗 {money(c.cost.cash ?? 0)}</p>
-          <Do
-            s={s}
-            act={act}
-            action={{ type: 'choice', id: c.id, eventId: e.id }}
-          >
-            {c.label}
-          </Do>
-          <Pager page={page} total={e.choices.length} setPage={setPage} />
+          <div className="encounter-choices">
+            {e.choices.map((c) => (
+              <section key={c.id}>
+                <TextPages text={c.hint} size={100} />
+                <p>现金消耗 {money(c.cost.cash ?? 0)}</p>
+                <Do
+                  s={s}
+                  act={act}
+                  action={{ type: 'choice', id: c.id, eventId: e.id }}
+                >
+                  {c.label}
+                </Do>
+              </section>
+            ))}
+          </div>
         </aside>
       </div>
     </Frame>
@@ -1305,8 +1594,13 @@ export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [rawExists, setRawExists] = useState(false);
   const [oldKeys, setOldKeys] = useState<string[]>([]);
-  const [error, setError] = useState('');
-  const [feedback, setFeedback] = useState('');
+  const [, setError] = useState('');
+  const [, setFeedback] = useState('');
+  const [result, setResult] = useState<OperationResult>();
+  const [todayOpen, setTodayOpen] = useState(false);
+  const [navigationRevision, setNavigationRevision] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [dismissedCelebration, setDismissedCelebration] = useState(-1);
   const [storageError, setStorageError] = useState('');
   const [tab, setTab] = useState<Tab>('market');
   const [restart, setRestart] = useState<3000 | 30000 | null>(null);
@@ -1321,18 +1615,19 @@ export default function Home() {
     setRawExists(true);
     try {
       const previous = localStorage.getItem(SAVE);
-      const backupKey = `${SAVE}-before-20260910`;
+      const backupKey = `${SAVE}-before-ux-revision-2`;
       if (
         previous &&
-        !previous.includes('"purchases":') &&
+        JSON.parse(previous).saveRevision !== 2 &&
         !localStorage.getItem(backupKey)
       ) {
         localStorage.setItem(backupKey, previous);
         setOldKeys((keys) => [...new Set([...keys, backupKey])]);
       }
       localStorage.setItem(SAVE, JSON.stringify(next));
+      setStorageError('');
     } catch {
-      setStorageError('无法自动保存，请导出当前存档再关闭页面。');
+      setStorageError('本次操作已完成，但保存失败。请导出当前进度再关闭页面。');
     }
   };
   useEffect(() => {
@@ -1346,6 +1641,9 @@ export default function Home() {
           ),
         );
         if (raw) setSaved(readSave(raw));
+        setReduceMotion(
+          localStorage.getItem('bianliang-reduce-motion') === 'true',
+        );
       } catch (e) {
         setStorageError((e as Error).message);
       }
@@ -1361,10 +1659,11 @@ export default function Home() {
         (a, r) => {
           if (!ref.current) return { error: '请先开始游戏' };
           const result = dispatch(ref.current, a, r);
+          if (result.error || isOperatingAction(a)) setResult(result.result);
           if (result.error) {
             setError(result.error);
             setFeedback(`操作未执行：${result.error}`);
-            return { error: result.error };
+            return { error: result.error, result: result.result };
           }
           setError('');
           setFeedback(result.state.lastResponse ?? result.state.story);
@@ -1377,6 +1676,7 @@ export default function Home() {
   const execute = (a: Action, revision = ref.current?.revision) => {
     if (!ref.current) return;
     const r = dispatch(ref.current, a, revision);
+    if (r.error || isOperatingAction(a)) setResult(r.result);
     if (r.error) {
       setError(r.error);
       setFeedback(`操作未执行：${r.error}`);
@@ -1395,10 +1695,21 @@ export default function Home() {
       'endLease',
       'sellHousing',
       'sellEquipment',
+      'abandonOrder',
     ].includes(a.type);
-    if (!p.error && (p.warning || destructive))
+    if (!p.error && (p.confirmation || destructive))
       setPending({
-        action: a,
+        action:
+          a.type === 'acceptOrder'
+            ? {
+                ...a,
+                confirm: orderTerms(
+                  ref.current.commerce.orders.find((o) => o.id === a.orderId)!,
+                ),
+              }
+            : a.type === 'return'
+              ? { ...a, confirm: returnTerms(ref.current) }
+              : a,
         revision: ref.current.revision,
         message:
           p.warning ||
@@ -1414,6 +1725,7 @@ export default function Home() {
     setSaved(null);
     setTab('market');
     setFeedback('新旅程已开始，带着800文走进汴梁。');
+    setResult(undefined);
   };
   const requestStart = (target: 3000 | 30000) => {
     if (rawExists || s) setRestart(target);
@@ -1437,261 +1749,392 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(url);
   };
+  const currentResult = result ?? s?.operationHistory.at(-1);
+  const highlight = s ? celebration(result, s) : '';
+  const tasks = s ? todayTasks(s) : [];
+  const navigate = (target: Tab, good?: Good) => {
+    if (good) {
+      setWorkspacePreference('market.category', GOODS[good].category);
+      setWorkspacePreference('market.good', good);
+      setWorkspacePreference('market.history', false);
+    }
+    setTab(target);
+    setNavigationRevision((v) => v + 1);
+  };
+  const openTask = (task: TodayTask) => {
+    if (!s || s.event || s.phase === 'ended') return;
+    if (s.phase === 'night') execute({ type: 'returnDay' });
+    if (task.preference) setWorkspacePreference(...task.preference);
+    if (task.id.startsWith('order:'))
+      setWorkspacePreference('orders.mode', '进行中');
+    if (task.id.startsWith('customer:'))
+      setWorkspacePreference('orders.mode', '熟客');
+    if (task.target === 'intel')
+      setWorkspacePreference('intel.category', '全部');
+    navigate(task.target, task.good);
+    setTodayOpen(false);
+  };
   return (
-    <main className={`game ${s ? 'playing' : 'welcome'}`}>
-      <header className="masthead">
-        <div className="brand">
-          <span className="seal">宋</span>汴梁归途 <small>长期经营手记</small>
-        </div>
-        <div className="toolbar">
-          {(rawExists || s) && (
-            <Btn subtle onClick={() => download()}>
-              导出存档
-            </Btn>
-          )}
-          {oldKeys.map((k) => (
-            <Btn key={k} subtle onClick={() => download(k)}>
-              {k.includes('before-20260910')
-                ? '导出修复前备份'
-                : '导出旧版存档'}
-            </Btn>
-          ))}
-          {s && (
-            <Btn subtle onClick={() => requestStart(s.target)}>
-              重新开始
-            </Btn>
-          )}
-        </div>
-      </header>
-      {!s ? (
-        <section className="opening">
-          <p>崇宁二年 · 东京城外</p>
-          <h1>
-            城门开了。
-            <br />
-            你的归途，还很远。
-          </h1>
-          <p>八百文起步，经营没有期限。看行情，学手艺，安置一间自己的作坊。</p>
-          <div className="watch">只认现金 · 三千文归航 / 三万文长途</div>
-          {storageError && <p className="reason">{storageError}</p>}
-          <div className="actions">
-            {saved && (
-              <Btn
-                onClick={() => {
-                  ref.current = saved;
-                  setS(saved);
-                }}
-              >
-                继续第{saved.day}日 · {money(saved.cash)}
-              </Btn>
-            )}
-            <Btn disabled={!loaded} onClick={() => requestStart(3000)}>
-              走进汴梁 · 3000文
-            </Btn>
-            <Btn disabled={!loaded} subtle onClick={() => requestStart(30000)}>
-              挑战三万文
-            </Btn>
-          </div>
-          <small>新局会在确认后替换当前进度；旧版存档单独保留。</small>
-        </section>
-      ) : (
-        <>
-          <section className="status">
-            <div>
-              <span>
-                第{s.day}日 · {s.weather}
-              </span>
-              <strong>
-                {s.phase === 'night'
-                  ? '夜间安排'
-                  : s.phase === 'ended'
-                    ? '旅程结束'
-                    : '经营日'}
-              </strong>
+    <FeedbackContext.Provider value={currentResult}>
+      <NavigationContext.Provider value={navigate}>
+        <main
+          className={`game ${s ? 'playing' : 'welcome'} ${reduceMotion ? 'reduce-motion' : ''}`}
+        >
+          <header className="masthead">
+            <div className="brand">
+              <span className="seal">宋</span>汴梁归途{' '}
+              <small>长期经营手记</small>
             </div>
-            <div>
-              <span>现金 / 目标</span>
-              <strong>
-                {money(s.cash)} / {money(s.target)}
-              </strong>
-              <progress max={s.target} value={s.cash} />
-            </div>
-            <div>
-              <span>健康 / 体力</span>
-              <strong>
-                {s.health} / {s.stamina}
-                <small>体力上限{staminaMax(s)}</small>
-              </strong>
-            </div>
-            <div>
-              <span>{HOUSING[s.housing.id].name} · 仓储</span>
-              <strong>
-                {num(occupied(s) / 10)} / {capacity(s) / 10}
-                <small>在制预留{num((reserved(s) - occupied(s)) / 10)}</small>
-              </strong>
-            </div>
-            <StatusEffects s={s} />
-            <div
-              className="operation-feedback"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              <span>操作响应</span>
-              <TextPages
-                key={feedback || s.lastResponse || s.story}
-                text={feedback || s.lastResponse || s.story}
-                size={40}
-              />
-            </div>
-          </section>
-          <nav className="workspaces" aria-label="经营工作区">
-            {Object.entries(tabs).map(([id, label]) => (
-              <button
-                key={id}
-                disabled={
-                  !!s.event || s.phase === 'night' || s.phase === 'ended'
-                }
-                aria-current={tab === id ? 'page' : undefined}
-                className={tab === id ? 'active' : ''}
-                onClick={() => {
-                  setTab(id as Tab);
-                  setError('');
-                  setFeedback(`已打开${label}。`);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-            {s.phase === 'market' && tab !== 'market' && (
-              <Btn subtle onClick={() => execute({ type: 'leave' })}>
-                离开市场
-              </Btn>
-            )}
-          </nav>
-          <div className="workspace">
-            {s.phase === 'ended' ? (
-              <Frame
-                title={s.ending === 'return' ? '归去来兮' : '旅程终章'}
-                note={`经营${s.stats.days}日 · ${s.deathCause || '归航的光亮起了。'}`}
-              >
-                <div className="split">
-                  <div className="detail">
-                    <h2>这一程的收获</h2>
-                    <p>
-                      生产{s.stats.productionRuns}批 · 产蛋{s.stats.eggs}枚 ·
-                      交易{s.stats.trades}次
-                    </p>
-                    <p>最高流动资产{money(s.stats.peakAssets)}</p>
-                    <TextPages
-                      text={
-                        achievements(s)
-                          .filter(([, ok]) => ok)
-                          .map(([name]) => name)
-                          .join(' · ') || '每一步都记在手记里。'
-                      }
-                    />
-                  </div>
-                  <aside className="detail">
-                    <TextPages text={s.story} />
-                    <Btn onClick={() => requestStart(s.target)}>再走一程</Btn>
-                  </aside>
-                </div>
-              </Frame>
-            ) : s.event ? (
-              <Encounter key={s.event.id} s={s} act={act} />
-            ) : s.phase === 'night' ? (
-              <Night s={s} act={act} />
-            ) : tab === 'market' ? (
-              <Market s={s} act={act} />
-            ) : tab === 'assets' ? (
-              <Assets s={s} act={act} />
-            ) : tab === 'production' ? (
-              <Production s={s} act={act} />
-            ) : tab === 'housing' ? (
-              <Housing s={s} act={act} />
-            ) : tab === 'people' ? (
-              <People s={s} act={act} />
-            ) : tab === 'intel' ? (
-              <Intel s={s} act={act} />
-            ) : (
-              <Ledger s={s} act={act} />
-            )}
-          </div>
-          <footer className="bottom-bar">
-            <div className="latest" aria-live="polite">
-              <small>{error || storageError ? '提示' : '最新手记'}</small>
-              <TextPages
-                key={error || storageError || s.story}
-                text={error || storageError || s.story}
-                size={65}
-              />
-            </div>
-            <div className="actions">
-              {!s.event && s.phase !== 'ended' && s.cash >= s.target && (
-                <Do s={s} act={act} action={{ type: 'return' }}>
-                  支付{money(s.target)}归航
-                </Do>
+            <div className="toolbar">
+              <label className="motion-setting">
+                <input
+                  type="checkbox"
+                  checked={reduceMotion}
+                  onChange={(e) => {
+                    setReduceMotion(e.target.checked);
+                    try {
+                      localStorage.setItem(
+                        'bianliang-reduce-motion',
+                        String(e.target.checked),
+                      );
+                    } catch {
+                      /* Preferences do not affect game saves. */
+                    }
+                  }}
+                />
+                减少动态
+              </label>
+              {(rawExists || s) && (
+                <Btn subtle onClick={() => download()}>
+                  导出存档
+                </Btn>
               )}
-              {!s.event && ['day', 'market'].includes(s.phase) && (
-                <Btn
-                  onClick={() =>
-                    s.phase === 'market'
-                      ? execute({ type: 'leave' })
-                      : act({ type: 'endDay' })
-                  }
-                >
-                  {s.phase === 'market'
-                    ? '离开市场，返回街巷'
-                    : '收工，安排今晚 →'}
+              {oldKeys.map((k) => (
+                <Btn key={k} subtle onClick={() => download(k)}>
+                  {k.includes('before-') ? '导出修复前备份' : '导出旧版存档'}
+                </Btn>
+              ))}
+              {s && (
+                <Btn subtle onClick={() => requestStart(s.target)}>
+                  重新开始
                 </Btn>
               )}
             </div>
-          </footer>
-        </>
-      )}
-      <Dialog
-        open={restart !== null}
-        onOpenChange={(open) => {
-          if (!open) setRestart(null);
-        }}
-      >
-        <DialogContent className="confirm" showCloseButton={false}>
-          <DialogTitle>重新走进汴梁？</DialogTitle>
-          <DialogDescription>
-            新目标：{restart === 30000 ? '三万文' : '三千文'}
-            。开始新局会覆盖当前存档，请先导出需要保留的进度。
-          </DialogDescription>
-          <div className="actions">
-            <Btn subtle onClick={() => setRestart(null)}>
-              保留当前旅程
-            </Btn>
-            <Btn onClick={() => restart && start(restart)}>开始新局</Btn>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={pending !== null}
-        onOpenChange={(open) => {
-          if (!open) setPending(null);
-        }}
-      >
-        <DialogContent className="confirm" showCloseButton={false}>
-          <DialogTitle>确认这次安排</DialogTitle>
-          <DialogDescription>{pending?.message}</DialogDescription>
-          <div className="actions">
-            <Btn subtle onClick={() => setPending(null)}>
-              返回调整
-            </Btn>
-            <Btn
-              onClick={() =>
-                pending && execute(pending.action, pending.revision)
-              }
-            >
-              确认执行
-            </Btn>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </main>
+          </header>
+          {!s ? (
+            <section className="opening">
+              <p>崇宁二年 · 东京城外</p>
+              <h1>
+                城门开了。
+                <br />
+                你的归途，还很远。
+              </h1>
+              <p>
+                八百文起步，经营没有期限。看行情，学手艺，安置一间自己的作坊。
+              </p>
+              <div className="watch">只认现金 · 三千文归航 / 三万文长途</div>
+              {storageError && <p className="reason">{storageError}</p>}
+              <div className="actions">
+                {saved && (
+                  <Btn
+                    onClick={() => {
+                      ref.current = saved;
+                      setS(saved);
+                    }}
+                  >
+                    继续第{saved.day}日 · {money(saved.cash)}
+                  </Btn>
+                )}
+                <Btn disabled={!loaded} onClick={() => requestStart(3000)}>
+                  走进汴梁 · 3000文
+                </Btn>
+                <Btn
+                  disabled={!loaded}
+                  subtle
+                  onClick={() => requestStart(30000)}
+                >
+                  挑战三万文
+                </Btn>
+              </div>
+              <small>新局会在确认后替换当前进度；旧版存档单独保留。</small>
+            </section>
+          ) : (
+            <>
+              <section className="status">
+                <div>
+                  <span>
+                    <StatusIcon kind="date" /> 第{s.day}日 · {s.weather}
+                  </span>
+                  <strong>
+                    {s.phase === 'night'
+                      ? '夜间安排'
+                      : s.phase === 'ended'
+                        ? '旅程结束'
+                        : '经营日'}
+                  </strong>
+                </div>
+                <div>
+                  <span>
+                    <StatusIcon kind="cash" /> 现金 / 目标
+                  </span>
+                  <strong>
+                    {money(s.cash)} / {money(s.target)}
+                    <ResourceDelta
+                      value={result?.cash ?? 0}
+                      revision={result?.id ?? 0}
+                    />
+                  </strong>
+                  <progress max={s.target} value={s.cash} />
+                </div>
+                <div>
+                  <div className="vital">
+                    <span>
+                      <StatusIcon kind="health" />
+                      健康 <b>{s.health}/100</b>
+                      <ResourceDelta
+                        value={result?.health ?? 0}
+                        revision={result?.id ?? 0}
+                      />
+                    </span>
+                    <progress aria-label="健康" max={100} value={s.health} />
+                  </div>
+                  <div className="vital">
+                    <span>
+                      <StatusIcon kind="stamina" /> 体力{' '}
+                      <b>
+                        {s.stamina}/{staminaMax(s)}
+                      </b>
+                      <ResourceDelta
+                        value={result?.stamina ?? 0}
+                        revision={result?.id ?? 0}
+                      />
+                    </span>
+                    <progress
+                      aria-label="体力"
+                      max={staminaMax(s)}
+                      value={s.stamina}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <span>
+                    <StatusIcon kind="storage" /> {HOUSING[s.housing.id].name} ·
+                    仓储
+                  </span>
+                  <strong>
+                    {num(occupied(s) / 10)} / {capacity(s) / 10}
+                    <small>
+                      在制预留{num((reserved(s) - occupied(s)) / 10)}
+                    </small>
+                  </strong>
+                  <progress
+                    aria-label="仓储（含在制预留）"
+                    max={capacity(s)}
+                    value={reserved(s)}
+                  />
+                </div>
+                <StatusEffects s={s} />
+                <Btn
+                  subtle
+                  onClick={() => {
+                    setTodayOpen(true);
+                  }}
+                >
+                  今日要事 ({tasks.length})
+                </Btn>
+              </section>
+              <div className="game-layout">
+                <PersistentAssets s={s} onAssets={() => navigate('assets')} />
+                <div className="work-column">
+                  <nav className="workspaces" aria-label="经营工作区">
+                    {Object.entries(tabs).map(([id, label]) => (
+                      <button
+                        key={id}
+                        disabled={
+                          !!s.event ||
+                          s.phase === 'night' ||
+                          s.phase === 'ended'
+                        }
+                        aria-current={tab === id ? 'page' : undefined}
+                        className={tab === id ? 'active' : ''}
+                        onClick={() => {
+                          setTab(id as Tab);
+                          setError('');
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </nav>
+                  <div className="workspace" key={navigationRevision}>
+                    {s.phase === 'ended' ? (
+                      <Frame
+                        title={s.ending === 'return' ? '归去来兮' : '旅程终章'}
+                        note={`经营${s.stats.days}日 · ${s.deathCause || '归航的光亮起了。'}`}
+                      >
+                        <div className="split">
+                          <div className="detail">
+                            <h2>这一程的收获</h2>
+                            <p>
+                              生产{s.stats.productionRuns}批 · 产蛋
+                              {s.stats.eggs}枚 · 交易{s.stats.trades}次
+                            </p>
+                            <p>最高流动资产{money(s.stats.peakAssets)}</p>
+                            <TextPages
+                              text={
+                                achievements(s)
+                                  .filter(([, ok]) => ok)
+                                  .map(([name]) => name)
+                                  .join(' · ') || '每一步都记在手记里。'
+                              }
+                            />
+                          </div>
+                          <aside className="detail">
+                            <TextPages text={s.story} />
+                            <Btn onClick={() => requestStart(s.target)}>
+                              再走一程
+                            </Btn>
+                          </aside>
+                        </div>
+                      </Frame>
+                    ) : s.event ? (
+                      <Encounter key={s.event.id} s={s} act={act} />
+                    ) : s.phase === 'night' ? (
+                      <Night s={s} act={act} />
+                    ) : tab === 'market' ? (
+                      <Market s={s} act={act} />
+                    ) : tab === 'assets' ? (
+                      <Assets s={s} act={act} />
+                    ) : tab === 'production' ? (
+                      <Production s={s} act={act} />
+                    ) : tab === 'housing' ? (
+                      <Housing s={s} act={act} />
+                    ) : tab === 'people' ? (
+                      <People s={s} act={act} />
+                    ) : tab === 'intel' ? (
+                      <Intel s={s} act={act} />
+                    ) : tab === 'orders' ? (
+                      <Orders
+                        s={s}
+                        act={act}
+                        onMarket={(good) => navigate('market', good)}
+                      />
+                    ) : (
+                      <Ledger s={s} act={act} />
+                    )}
+                  </div>
+                  <footer className="bottom-bar">
+                    <div className="actions">
+                      {!s.event &&
+                        s.phase !== 'ended' &&
+                        s.cash >= s.target && (
+                          <Do s={s} act={act} action={{ type: 'return' }}>
+                            支付{money(s.target)}归航
+                          </Do>
+                        )}
+                      {!s.event && ['day', 'market'].includes(s.phase) && (
+                        <Btn onClick={() => act({ type: 'endDay' })}>
+                          收工，安排今晚 →
+                        </Btn>
+                      )}
+                    </div>
+                  </footer>
+                </div>
+                <RecordFeed s={s} current={currentResult} />
+              </div>
+            </>
+          )}
+          <Dialog
+            open={restart !== null}
+            onOpenChange={(open) => {
+              if (!open) setRestart(null);
+            }}
+          >
+            <DialogContent className="confirm" showCloseButton={false}>
+              <DialogTitle>重新走进汴梁？</DialogTitle>
+              <DialogDescription>
+                新目标：{restart === 30000 ? '三万文' : '三千文'}
+                。开始新局会覆盖当前存档，请先导出需要保留的进度。
+              </DialogDescription>
+              <div className="actions">
+                <Btn subtle onClick={() => setRestart(null)}>
+                  保留当前旅程
+                </Btn>
+                <Btn onClick={() => restart && start(restart)}>开始新局</Btn>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={pending !== null}
+            onOpenChange={(open) => {
+              if (!open) setPending(null);
+            }}
+          >
+            <DialogContent className="confirm" showCloseButton={false}>
+              <DialogTitle>确认这次安排</DialogTitle>
+              <DialogDescription>{pending?.message}</DialogDescription>
+              <div className="actions">
+                <Btn subtle onClick={() => setPending(null)}>
+                  返回调整
+                </Btn>
+                <Btn
+                  onClick={() =>
+                    pending && execute(pending.action, pending.revision)
+                  }
+                >
+                  确认执行
+                </Btn>
+              </div>
+            </DialogContent>
+          </Dialog>
+          {storageError && s && (
+            <div className="save-alert" role="alert">
+              {storageError}
+              <button className="text-button" onClick={() => download()}>
+                导出当前进度
+              </button>
+            </div>
+          )}
+          {highlight && currentResult?.id !== dismissedCelebration && (
+            <output className="celebration">
+              {highlight}
+              <button
+                className="text-button"
+                onClick={() => setDismissedCelebration(currentResult?.id ?? -1)}
+              >
+                收下这份喜悦
+              </button>
+            </output>
+          )}
+          <Dialog open={todayOpen} onOpenChange={setTodayOpen}>
+            <DialogContent className="confirm history-dialog">
+              <DialogTitle>今日要事与市集日历</DialogTitle>
+              <DialogDescription>
+                先处理风险，再安排生意；日历仅公开主题，实际价格会波动。
+              </DialogDescription>
+              {tasks.map((task) => (
+                <div className="today-task" key={task.id}>
+                  <div>
+                    <strong>{task.title}</strong>
+                    <small>{task.detail}</small>
+                  </div>
+                  <Btn
+                    subtle
+                    disabled={!!s?.event || s?.phase === 'ended'}
+                    onClick={() => openTask(task)}
+                  >
+                    前往处理
+                  </Btn>
+                </div>
+              ))}
+              {!tasks.length && <p>暂无待办，可以按自己的节奏经营。</p>}
+              {!!s?.event && (
+                <p className="reason">先处理眼前遭遇，再继续经营。</p>
+              )}
+            </DialogContent>
+          </Dialog>
+        </main>
+      </NavigationContext.Provider>
+    </FeedbackContext.Provider>
   );
 }

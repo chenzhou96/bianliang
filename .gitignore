@@ -41,10 +41,16 @@ next-env.d.ts
 # generated test data and screenshots
 /tests/browser-output/
 /tests/simulation-results.json
+/tests/simulation-*-results.json
 /tests/content-review.json
 /tests/content-review.md
 /audit/**/*.png
 /audit/**/*.json
+
+# reproducible layout previews (keep render scripts and design notes)
+/design/layout-options/layout-*.html
+/design/layout-options/layout-*.png
+/design/layout-options/metrics*.json
 
 # TypeScript incremental build cache
 *.tsbuildinfo

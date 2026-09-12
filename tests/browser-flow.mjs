@@ -25,16 +25,6 @@ try {
         await click('向附近人查问 · 5文');
         inspections++;
       }
-      const next = page
-        .locator('.detail')
-        .last()
-        .getByRole('button', { name: '下一页', exact: true });
-      while (
-        !(await page
-          .getByRole('button', { name: '告辞离开', exact: true })
-          .count())
-      )
-        await next.click();
       await click('告辞离开');
       continue;
     }
