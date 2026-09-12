@@ -8,17 +8,16 @@ import type {
 } from './types.ts';
 
 export const RULES = {
-  version: '2.0-long-game',
+  version: '3.0-continuous-time',
   initialCash: 800,
   tradeStaminaPerUnit: 1,
   shortWage: 25,
   heavyWage: 40,
   shortEnergy: 25,
   heavyEnergy: 40,
-  maxWorkPerDay: 2,
   lessonStamina: 20,
   snackStamina: 15,
-  restStamina: 25,
+  restStamina: 20,
   maxLogs: 80,
   maxIntel: 120,
   feed: 2,
@@ -148,8 +147,8 @@ export const BUFFS: Record<Buff, { name: string; detail: string }> = {
   outsider: { name: '异乡人', detail: '初到汴梁，听到消息后记得追问出处' },
   regular: { name: '粮商熟客', detail: '购买粟米九五折，仍保留买卖差价' },
   tired: { name: '劳累', detail: '劳动和生产体力成本 +5' },
-  cold: { name: '风寒', detail: '夜间健康 −2；持续两夜' },
-  warm: { name: '热饭余温', detail: '本次夜间体力恢复 +5' },
+  cold: { name: '风寒', detail: '每24小时健康 −2，按实际时间累计；持续48小时' },
+  warm: { name: '热饭余温', detail: '接下来8小时内，睡眠每8小时额外恢复5体力' },
 };
 
 export const SKILLS: Record<

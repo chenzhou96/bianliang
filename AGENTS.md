@@ -9,7 +9,7 @@
 - `components/ui/` and `hooks/`: reusable UI components and hooks; `public/`: static assets.
 - `tests/`: rule/interface tests, simulations, content review, and browser flows.
 - `scripts/`: local serving and build helpers.
-- `EXPANSION_PLAN.md`: design scope; `TEST_REPORT.md`: validation results.
+- `docs/README.md`: documentation index; `docs/plans/`: current design; `docs/reports/`: feature audits; `docs/archive/`: historical records. `TEST_REPORT.md` holds current validation results.
 
 ## Build, Test, and Development Commands
 
@@ -41,4 +41,4 @@ History mixes Chinese summaries and English `feat:` messages; no uniform prefix 
 
 ## Game Architecture & Persistence
 
-Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. Preserve v1 saves and existing v2 progress; never silently overwrite incompatible saves. Expose only player-known information through WebMCP.
+Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v3`. Old v1/v2 saves remain exportable but are not migrated or loaded; never overwrite their keys. Expose only player-known information through WebMCP.

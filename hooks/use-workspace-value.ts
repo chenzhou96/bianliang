@@ -23,9 +23,10 @@ const choices: Record<string, readonly string[]> = {
   'market.good': GOOD_IDS,
   'production.mode': ['配方', '设备', '队列'],
   'housing.id': HOUSING_IDS,
+  'housing.view': ['生活', '房屋', '设施'],
   'people.id': ['身体', '成长', ...SKILL_IDS],
   'orders.mode': ['可接订单', '进行中', '近期记录', '熟客'],
-  'assets.category': ['货物', '在制品', '设备', '房产'],
+  'assets.category': ['货物', '在制品', '设备', '设施', '房产'],
 };
 export function useWorkspaceValue<T extends string | number | boolean>(
   key: string,

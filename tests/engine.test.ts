@@ -1,10 +1,10 @@
+import { closeDay, setDay } from './helpers.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dispatch,
   actionPreview,
   newGame,
-  nightPreview,
   occupied,
   quantity,
   readSave,
@@ -24,16 +24,10 @@ function act(s: GameState, a: Action) {
   return r.state;
 }
 function night(s: GameState) {
-  if (s.phase === 'day') s = act(s, { type: 'endDay' });
-  return act(s, {
-    type: 'night',
-    meal: quantity(s, 'bread') ? 'bread' : 'none',
-    bed: 'street',
-    feed: 0,
-  });
+  return closeDay(s);
 }
 
-void test('v2 content and rules expose the planned long-game surface', () => {
+void test('v3 content and rules expose the planned long-game surface', () => {
   assert.equal(GOOD_IDS.length, 17);
   assert.equal(CONTENT_INFO.length, 120);
   assert.equal(INFO_TEMPLATES.length, 120);
@@ -85,49 +79,55 @@ void test('food production chain works from learning through installation and sa
   assert(s.ledger.productionRevenue > 0);
 });
 
-void test('overnight production reserves output space and completes after the required nights', () => {
+void test('timed production reserves output space and completes after actual processing minutes', () => {
   let s = newGame(4);
   s = act(s, { type: 'rentHousing', housing: 'room' });
   s = act(s, { type: 'install', equipment: 'pickleVat' });
   s = act(s, { type: 'learn', skill: 'food' });
   s.batches.push({
-    id: 900,
+    id: s.nextId++,
     good: 'egg',
     units: 20,
     cost: 12,
-    expires: 6,
+    remainingMinutes: 7200,
+
     origin: 'buy',
   });
   s = act(s, { type: 'produce', recipeId: 'saltedEgg', quantity: 1 });
   assert.equal(quantity(s, 'saltedEgg'), 0);
-  assert.equal(s.jobs[0].readyDay, 3);
+  assert.equal(s.jobs[0].remainingMinutes, 2 * 1440);
   assert.equal(reserved(s), occupied(s) + 30);
   s = night(s);
   assert.equal(s.day, 2);
   assert.equal(quantity(s, 'saltedEgg'), 0);
   s = night(s);
   assert.equal(s.day, 3);
+  s = act(s, { type: 'wait', minutes: s.jobs[0].remainingMinutes! });
   assert.equal(quantity(s, 'saltedEgg'), 3);
   assert.equal(s.equipment.find((e) => e.kind === 'pickleVat')?.jobId, null);
 });
 
-void test('work, lessons, rest and treatment use daily limits rather than action points', () => {
+void test('time limits work and rest while lessons and treatment keep cycle limits', () => {
   let s = newGame(5);
   s = act(s, { type: 'short' });
   s = act(s, { type: 'short' });
   assert.equal(s.daily.work, 2);
-  assert(dispatch(s, { type: 'short' }).error);
+  s = act(s, { type: 'short' });
+  assert.equal(s.daily.work, 3);
+  s.stamina = 100;
   s = act(s, { type: 'learn', skill: 'food' });
   assert(dispatch(s, { type: 'learn', skill: 'textile' }).error);
   s.health = 35;
   s.stamina = 80;
-  assert.equal(staminaMax(s), 60);
+  assert(staminaMax(s) < 60 && staminaMax(s) >= 30);
   assert(dispatch(s, { type: 'heavy' }).error);
+  setDay(s, 2);
   s = act(s, { type: 'treat', mode: 'slow' });
   assert.equal(s.daily.treatment, 1);
   assert(dispatch(s, { type: 'treat', mode: 'slow' }).error);
   s = act(s, { type: 'rest' });
-  assert(dispatch(s, { type: 'rest' }).error);
+  s = act(s, { type: 'rest' });
+  assert(s.clock.sleepDebt > 0);
 });
 
 void test('housing downgrade never destroys assets and ownership sale is fixed-price', () => {
@@ -152,21 +152,19 @@ void test('housing downgrade never destroys assets and ownership sale is fixed-p
   assert.deepEqual(readSave(JSON.stringify(s)), s);
 });
 
-void test('night preflight shares grain, supports free survival, and save resumes exactly', () => {
+void test('meal and feed share inventory, free sleep remains available and saves resume', () => {
   let s = newGame(7);
-  s.phase = 'night';
+  s.cash = 0;
   s.batches = s.batches.filter((b) => b.good === 'grain');
   s.batches[0].units = 10;
-  assert.throws(() =>
-    nightPreview(s, { type: 'night', meal: 'grain', bed: 'street', feed: 1 }),
-  );
-  s = act(s, { type: 'night', meal: 'none', bed: 'street', feed: 0 });
+  s.hens = [{ id: s.nextId++, hunger: 0, cost: 100 }];
+  s = act(s, { type: 'eat', meal: 'grain' });
+  assert(dispatch(s, { type: 'feed', count: 1 }).error);
+  s = act(s, { type: 'wait', minutes: 1320 - s.clock.minute });
+  s = act(s, { type: 'sleep', minutes: 480, bed: 'street' });
   assert.equal(s.day, 2);
-  const copy = readSave(JSON.stringify(s));
-  assert.deepEqual(copy, s);
-  const corrupt = JSON.parse(JSON.stringify(s));
-  corrupt.version = 99;
-  assert.throws(() => readSave(JSON.stringify(corrupt)));
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
+  assert.throws(() => readSave(JSON.stringify({ ...s, version: 99 })));
 });
 
 void test('event save does not reveal hidden facts through public state and every old event still has a decline', () => {
@@ -176,7 +174,7 @@ void test('event save does not reveal hidden facts through public state and ever
     ),
   );
   const s = newGame(8);
-  s.day = 2;
+  setDay(s, 2, 540);
   s.phase = 'day';
   s.encounterDay = 0;
   const r = dispatch(s, { type: 'tea' });
@@ -205,12 +203,12 @@ void test('reselling purchased goods counts cost once and keeps production separ
   assert.equal(s.ledger.tradeCost, 113);
   assert.equal(s.ledger.tradeRevenue - s.ledger.tradeCost, -16);
   s.batches.push({
-    id: 900,
+    id: s.nextId++,
     good: 'herb',
     units: 10,
     cost: 25,
     origin: 'production',
-    expires: null,
+    remainingMinutes: null,
   });
   s = act(s, { type: 'trade', side: 'sell', good: 'herb', quantity: 1 });
   assert.equal(s.ledger.tradeRevenue, 97);
@@ -233,7 +231,8 @@ void test('fractional trades charge accumulated carrying, not per-order rounding
     good: 'grain',
     quantity: 1,
   });
-  assert.equal(split.stamina, bulk.stamina);
+  assert.ok(Math.abs(split.stamina - bulk.stamina) < 1e-8);
+  assert(split.clock.minute > bulk.clock.minute);
   const repeat = dispatch(
     split,
     { type: 'trade', side: 'buy', good: 'grain', quantity: 1 },
@@ -249,20 +248,20 @@ void test('queued work pauses on eviction, cancellation gives no XP, and recover
   s = act(s, { type: 'install', equipment: 'brewVat' });
   s = act(s, { type: 'learn', skill: 'brewing' });
   s.batches.push({
-    id: 900,
+    id: s.nextId++,
     good: 'firewood',
     units: 10,
     cost: 12,
     origin: 'buy',
-    expires: null,
+    remainingMinutes: null,
   });
   s = act(s, { type: 'produce', recipeId: 'wine', quantity: 1 });
   assert.equal(s.skillXp.brewing, 0);
   const job = s.jobs[0];
   s = act(s, { type: 'endLease' });
-  s = act(s, { type: 'endDay' });
-  s = act(s, { type: 'night', meal: 'diner', bed: 'inn', feed: 0 });
-  assert.equal(s.jobs[0].readyDay, job.readyDay + 1);
+  const remaining = s.jobs[0].remainingMinutes;
+  s = closeDay(s, 'inn');
+  assert.equal(s.jobs[0].remainingMinutes, remaining);
   assert.equal(s.jobs[0].status, 'queued');
   assert.deepEqual(readSave(JSON.stringify(s)), s);
   s = act(s, { type: 'rentHousing', housing: 'room' });
@@ -275,49 +274,36 @@ void test('queued work pauses on eviction, cancellation gives no XP, and recover
   assert.equal(s.cash - before, 216);
   assert(dispatch(s, { type: 'sellEquipment', equipmentId: 500 }).error);
 });
-void test('maintenance and rent are paid even with temporary lodging, and free eviction is atomic', () => {
+void test('maintenance and rent are paid with outside lodging and unpaid homes suspend safely', () => {
   let s = newGame(12);
   s.cash = 10000;
   s = act(s, { type: 'buyHousing', housing: 'yard' });
-  s.phase = 'night';
   s.cash = 18;
-  let p = nightPreview(s, {
-    type: 'night',
-    meal: 'diner',
-    bed: 'yard',
-    feed: 0,
-  });
-  assert(p.maintenanceSkipped);
-  assert.equal(p.cash, 18);
-  s = act(s, { type: 'night', meal: 'diner', bed: 'yard', feed: 0 });
+  s = closeDay(s, 'yard');
   assert.equal(s.cash, 0);
   assert(s.housing.maintenanceSuspended);
   s.cash = 16;
   s = act(s, { type: 'maintain' });
   assert.equal(s.housing.maintenanceSuspended, false);
-  s = newGame(13);
-  s = act(s, { type: 'rentHousing', housing: 'room' });
-  s.phase = 'night';
-  p = nightPreview(s, { type: 'night', meal: 'diner', bed: 'inn', feed: 0 });
-  assert.equal(p.cash, 60);
+  assert(dispatch(s, { type: 'maintain' }).error);
+  s = act(newGame(13), { type: 'rentHousing', housing: 'room' });
+  const before = s.cash;
+  s = closeDay(s, 'inn');
+  assert.equal(before - s.cash, 60);
   s.cash = 18;
-  s = act(s, { type: 'night', meal: 'diner', bed: 'room', feed: 0 });
+  s = closeDay(s, 'room');
   assert.equal(s.cash, 0);
   assert.equal(s.housing.id, 'street');
 });
-void test('old v2 ledger resets explicitly without losing inventory, and healthy multi-day saves resume', () => {
+void test('new multi-day saves round-trip and missing ledger fields are rejected', () => {
   const s = newGame(20);
-  s.day = 50;
+  setDay(s, 50);
   s.buffs = {};
-  s.housing = { id: 'room', paidThrough: 1, maintenanceSuspended: false };
+  s.housing = { id: 'room', paidThrough: null, maintenanceSuspended: false };
   assert.deepEqual(readSave(JSON.stringify(s)), s);
-  const old = JSON.parse(JSON.stringify(s));
-  delete old.ledger.purchases;
-  const migrated = readSave(JSON.stringify(old));
-  assert.equal(migrated.cash, s.cash);
-  assert.deepEqual(migrated.batches, s.batches);
-  assert.equal(migrated.ledger.sinceDay, 50);
-  assert(migrated.story.includes('重新记账'));
+  const broken = JSON.parse(JSON.stringify(s));
+  delete broken.ledger.purchases;
+  assert.throws(() => readSave(JSON.stringify(broken)));
 });
 void test('100 days of tea obey semantic and story cooldowns with actionable text', () => {
   assert.equal(new Set(INFO_TEMPLATES.map((t) => t.semantic)).size, 120);
@@ -329,6 +315,7 @@ void test('100 days of tea obey semantic and story cooldowns with actionable tex
   let total = 0;
   const categories = new Set<string>();
   for (let day = 1; day <= 100; day++) {
+    s = act(s, { type: 'wait', minutes: 60 });
     s = act(s, { type: 'tea' });
     const fresh = s.intel.filter((i) => i.heardDay === day);
     assert.equal(fresh.length, 3);
@@ -344,8 +331,7 @@ void test('100 days of tea obey semantic and story cooldowns with actionable tex
     }
     if (s.event)
       s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
-    s = act(s, { type: 'endDay' });
-    s = act(s, { type: 'night', meal: 'diner', bed: 'mansion', feed: 0 });
+    s = closeDay(s, 'mansion');
   }
   assert.equal(total, 300);
   assert(categories.size >= 8);
@@ -380,10 +366,11 @@ void test('every recipe completes purchase-learn-install-produce-sell with reloa
     s = act(s, { type: 'produce', recipeId: recipe.id, quantity: 1 });
     s = readSave(JSON.stringify(s));
     for (let n = 0; n < recipe.duration; n++) {
-      s = act(s, { type: 'endDay' });
-      s = act(s, { type: 'night', meal: 'diner', bed: 'room', feed: 0 });
+      s = closeDay(s, 'room');
       s = readSave(JSON.stringify(s));
     }
+    if (s.jobs[0].status === 'queued' && s.jobs[0].remainingMinutes! > 0)
+      s = act(s, { type: 'wait', minutes: s.jobs[0].remainingMinutes! });
     const output = quantity(s, recipe.output);
     assert(output > 0, recipe.id);
     assert.equal(s.jobs.filter((j) => j.status === 'queued').length, 0);
@@ -412,7 +399,10 @@ void test('fatigue warning uses the same action cost and invalid inputs are atom
   const p = actionPreview(s, a);
   assert(p.warning);
   const next = act(s, a);
-  assert.equal(next.health, s.health - 2);
+  assert.equal(next.health, s.health);
+  assert.equal(p.healthChange, 0);
+  assert.equal(p.confirmation, false);
+  assert.doesNotMatch(p.warning, /健康−2/);
   assert.equal(next.stamina, 0);
   s = act(newGame(17), { type: 'market' });
   for (const q of [NaN, Infinity, -1, 0, 0.15]) {
@@ -437,8 +427,8 @@ void test('poultry feed costs follow eggs instead of disappearing from productio
   s.batches = [];
   s = act(s, { type: 'trade', good: 'grain', quantity: 2, side: 'buy' });
   s = act(s, { type: 'leave' });
-  s = act(s, { type: 'endDay' });
-  s = act(s, { type: 'night', meal: 'diner', bed: 'courtyard', feed: 10 });
+  s = act(s, { type: 'feed', count: 10 });
+  s = closeDay(s, 'courtyard');
   assert(quantity(s, 'egg') > 0);
   assert.equal(s.ledger.feed, 42);
   assert.equal(
@@ -449,36 +439,31 @@ void test('poultry feed costs follow eggs instead of disappearing from productio
   assert(s.skillXp.husbandry > 0);
 });
 
-void test('a thousand nights retain future events, resumable saves and a reconciled cash journal', () => {
+void test('a thousand clock-driven days retain future events, resumable saves and a reconciled cash journal', () => {
   let s = newGame(20260910, 30000);
   s.cash = 100000;
   let balance = s.cash;
   let peak = 0;
   let publicEvents = 0;
   for (let day = 1; day <= 1000; day++) {
-    for (const action of [
-      { type: 'short' },
-      { type: 'endDay' },
-      { type: 'night', meal: 'diner', bed: 'inn', feed: 0 },
-    ] as Action[]) {
-      if (s.event) {
-        const r = dispatch(s, {
-          type: 'choice',
-          eventId: s.event.id,
-          id: 'decline',
-        });
-        assert(!r.error);
-        s = r.state;
-      }
+    const perform = (action: Action) => {
+      if (s.event)
+        s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
       const before = s.nextId;
-      const r = dispatch(s, action);
-      assert(!r.error, r.error);
-      balance += r.state.logs
+      const next = act(s, action);
+      balance += next.logs
         .filter((l) => l.id >= before)
         .reduce((v, l) => v + l.cash, 0);
-      s = r.state;
+      s = next;
       assert.equal(s.cash, balance);
-    }
+    };
+    perform({ type: 'short' });
+    if (s.event)
+      s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
+    perform({ type: 'eat', meal: 'diner' });
+    perform({ type: 'wait', minutes: 1320 - (s.clock.minute % 1440) });
+    perform({ type: 'sleep', minutes: 480, bed: 'inn' });
+    perform({ type: 'wait', minutes: 120 });
     assert(s.worlds.some((w) => w.expected > s.day));
     publicEvents = s.stats.events;
     if (day % 50 === 0) {
@@ -498,6 +483,7 @@ void test('a thousand nights retain future events, resumable saves and a reconci
 void test('city reports replace lessons and persist their own verifiable follow-up', () => {
   let s = newGame(20260910);
   s.worlds = [];
+  s.clock.minute = 540;
   s = act(s, { type: 'tea' });
   s.event = null;
   assert.equal(s.intel.length, 3);
@@ -512,7 +498,7 @@ void test('city reports replace lessons and persist their own verifiable follow-
   assert.deepEqual(premature.state, s);
   s = readSave(JSON.stringify(s))!;
   assert.deepEqual(s.intel[0].resolution, expected);
-  s.day = expected.due;
+  setDay(s, expected.due, 540);
   s = act(s, { type: 'visitIntel', id: entry.id });
   assert.equal(s.intel[0].followUp, expected.text);
   assert(s.intel[0].visited);
@@ -525,10 +511,7 @@ void test('city reports replace lessons and persist their own verifiable follow-
     resolution: undefined,
   };
   s.intel.push(oldLesson);
-  const restored = readSave(JSON.stringify(s))!;
-  assert(!restored.intel.some((i) => i.id === 'old-lesson'));
-  assert.equal(restored.cash, s.cash);
-  assert.deepEqual(restored.batches, s.batches);
+  assert.throws(() => readSave(JSON.stringify(s)));
 });
 
 void test('operation feedback records current action and exact resource changes across reloads', () => {

@@ -1,3 +1,4 @@
+import { closeDay } from './helpers.ts';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { newGame, dispatch } from '../lib/game/engine.ts';
@@ -27,6 +28,7 @@ const orderRecent = new Map<string, number>();
 const orderObservations: { day: number; titles: string[] }[] = [];
 let customerMessages = 0;
 for (let day = 1; day <= 100; day++) {
+  act({ type: 'wait', minutes: 60 });
   act({ type: 'tea' });
   if (s.event) act({ type: 'choice', eventId: s.event.id, id: 'decline' });
   const fresh = s.intel.filter((i) => i.heardDay === day);
@@ -77,8 +79,7 @@ for (let day = 1; day <= 100; day++) {
       semantic: i.semantic,
     })),
   });
-  act({ type: 'endDay' });
-  act({ type: 'night', meal: 'diner', bed: 'mansion', feed: 0 });
+  s = closeDay(s, 'mansion');
 }
 const result = {
   templates: INFO_TEMPLATES.length,

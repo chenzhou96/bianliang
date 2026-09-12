@@ -345,7 +345,7 @@ strong {
 }
 .btn {
   height: auto !important;
-  min-height: 38px;
+  min-height: 40px;
   padding: 7px 12px !important;
   background: var(--teal);
   color: white;
@@ -368,7 +368,7 @@ strong {
 .toolbar,
 .actions {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 10px;
 }
@@ -380,8 +380,9 @@ strong {
 }
 .toolbar .action {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  flex-direction: column;
+  gap: 3px;
+  align-items: stretch;
 }
 .toolbar .reason {
   max-width: 270px;
@@ -582,7 +583,7 @@ input[type='number'] {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 .reason {
   color: #93442e;
@@ -1499,4 +1500,232 @@ input[type='number'] {
   .workspaces {
     flex-wrap: wrap;
   }
+}
+
+/* Continuous daytime and evening share the same accessible paper surface. */
+[hidden] {
+  display: none !important;
+}
+.game[data-period='dawn'] {
+  --paper: #fffaf0;
+  --wash: #f0ecda;
+}
+.game[data-period='dusk'] {
+  --paper: #fff8ec;
+  --wash: #efe1cf;
+  --teal: #754b33;
+}
+.game[data-period='evening'],
+.game[data-period='late'] {
+  --paper: #f0f1ed;
+  --wash: #dce3e4;
+  --ink: #182f3b;
+  --muted: #435863;
+  --line: #b6c5ca;
+  --teal: #294e67;
+}
+.game[data-period='late'] .masthead {
+  border-bottom-color: #607c8b;
+}
+.city-clock-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.housing-body {
+  min-height: 0;
+  overflow: auto;
+}
+.housing-body > .split {
+  min-height: 0;
+}
+.housing-body .detail {
+  min-width: 0;
+}
+.housing-body input {
+  max-width: 120px;
+}
+.housing-body details {
+  padding: 8px 0;
+}
+.wake-summary p {
+  font-size: 12px;
+  margin: 4px 0;
+}
+@media (max-width: 700px) {
+  .city-clock-note {
+    flex-wrap: wrap;
+  }
+  .housing-body .actions {
+    flex-wrap: wrap;
+  }
+  .housing-body {
+    overflow: visible;
+  }
+}
+@media (min-width: 1051px) {
+  .playing {
+    grid-template-rows: 40px 24px 72px minmax(0, 1fr);
+  }
+  .city-clock-note {
+    align-items: center;
+    min-height: 0;
+  }
+  .housing-body {
+    flex: 1;
+  }
+  .housing-body > .split {
+    height: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  .playing .status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .playing .status .vital span {
+    flex-wrap: wrap;
+  }
+  .playing > header {
+    height: auto;
+    min-height: 40px;
+  }
+  .game-layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .work-column {
+    order: -1;
+    display: flex;
+    flex-direction: column;
+  }
+  .work-column .workspaces {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    height: auto;
+  }
+  .work-column .workspace,
+  .work-column .panel {
+    height: auto;
+    overflow: visible;
+  }
+  .work-column .panel > .split,
+  .housing-body > .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .work-column .list-column,
+  .work-column .detail,
+  .work-column .ledger-grid {
+    overflow: visible;
+  }
+  .work-column .item-list {
+    max-height: 320px;
+  }
+  .work-column .bottom-bar {
+    flex-wrap: wrap;
+  }
+  .record-rail {
+    grid-column: auto;
+  }
+}
+
+/* Keep the action itself aligned; explanatory text has its own row. */
+.action > .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 40px;
+}
+.actions > select,
+.actions > input:not([type='checkbox']) {
+  min-height: 40px;
+  box-sizing: border-box;
+}
+.life-section {
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+}
+.life-section h3 {
+  margin: 0 0 10px;
+}
+.life-section .actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+.life-section .actions > select,
+.life-section .actions > input {
+  width: 100%;
+  min-width: 0;
+}
+.auto-feed-setting,
+.plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.6;
+}
+.auto-feed-setting input,
+.plan-item input {
+  margin-top: 5px;
+  flex: 0 0 auto;
+}
+.auto-feed-setting {
+  grid-column: 1 / -1;
+}
+.street-body .detail + .detail {
+  margin-top: 10px;
+}
+.city-schedule {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.city-schedule summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+@media (max-width: 700px) {
+  .city-clock-note {
+    flex-wrap: wrap;
+  }
+  .work-column .workspaces {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .life-section .actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.work-column .panel > .street-body {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+}
+.work-column .street-body > .list-column {
+  display: block;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.work-column .street-body > .list-column > .detail {
+  overflow: visible;
+}
+.production-actions .action {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.care-grid .action > .btn {
+  min-height: 48px;
+}
+@media (max-width: 700px) {
+  .work-column .panel > .street-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .work-column .street-body > .list-column {
+    overflow: visible;
+  }
+}
+.life-section .actions > input[type='number'] {
+  max-width: none;
 }

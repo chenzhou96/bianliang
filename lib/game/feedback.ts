@@ -1,4 +1,6 @@
-import { BUFFS, GOODS, GOOD_IDS, RULES, SKILL_IDS } from './config.ts';
+import { productionReadyAt } from './production-time.ts';
+import { statusActive } from './status.ts';
+import { BUFFS, GOODS, GOOD_IDS, SKILL_IDS } from './config.ts';
 import { CUSTOMER_IDS } from './commerce.ts';
 import type {
   Action,
@@ -8,7 +10,7 @@ import type {
   OperationResult,
 } from './types.ts';
 
-const NAVIGATION = new Set(['market', 'leave', 'endDay', 'returnDay', 'stay']);
+const NAVIGATION = new Set(['market', 'leave', 'stay']);
 export function isOperatingAction(action: Action) {
   return !NAVIGATION.has(action.type);
 }
@@ -25,6 +27,20 @@ export function actionTitle(action: Action): string {
     return `${action.side === 'buy' ? '购入' : '售出'}${GOODS[action.good]?.name ?? '货物'} ×${action.quantity}`;
   const names: Partial<Record<Action['type'], string>> = {
     market: '进入市场',
+    buyLot: '整批采购完成',
+    supplyRequest: '限量收购交货',
+    reserveRequest: '需求已预留',
+    buyCart: '购置手推车',
+    installFacility: '设施安装完成',
+    removeFacility: '设施已封存',
+    sellFacility: '设施出售完成',
+    coldPriority: '保鲜顺序已更新',
+    host: '熟客家宴',
+    eat: '用餐完成',
+    feed: '喂养完成',
+    sleep: '睡眠结束',
+    wait: '等待结束',
+    autoFeed: '自动喂养设置',
     refill: '原料补齐',
     acceptOrder: '订单已接取',
     deliverOrder: '订单已交付',
@@ -32,9 +48,7 @@ export function actionTitle(action: Action): string {
     declineOrder: '暂不接取订单',
     meetCustomer: '拜访客户',
     visitCustomer: '人物回访',
-    returnDay: '返回白天',
     leave: '离开市场',
-    endDay: '安排今晚',
     short: '短工完成',
     heavy: '重活完成',
     rest: '休息完成',
@@ -42,7 +56,6 @@ export function actionTitle(action: Action): string {
     treat: '治疗完成',
     learn: '学习完成',
     produce: '生产开工',
-    night: '夜间结算',
     tea: '听取消息',
     askIntel: '追问出处',
     visitIntel: '回访消息',
@@ -91,6 +104,9 @@ export function operationResult(
           depositLoss: after.ledger.depositLosses - before.ledger.depositLosses,
         }
       : {}),
+    tradeMilestones: Object.keys(after.marketOffers.milestones).filter(
+      (id) => before.marketOffers.milestones[id] === undefined,
+    ),
     milestones: Object.keys(after.commerce.milestones).filter(
       (id) => !before.commerce.milestones[id],
     ),
@@ -98,6 +114,8 @@ export function operationResult(
       id,
       change: after.commerce.relations[id] - before.commerce.relations[id],
     })).filter((c) => c.change !== 0),
+    startedAt: before.clock.minute,
+    finishedAt: after.clock.minute,
     id: after.revision,
     day: before.day,
     action: action.type,
@@ -119,29 +137,27 @@ export function operationResult(
     })).filter((v) => v.xp !== 0 || v.level !== 0),
     states: (Object.keys(BUFFS) as Buff[])
       .filter(
-        (buff) =>
-          (before.buffs[buff] ?? 0) >= before.day !==
-          (after.buffs[buff] ?? 0) >= after.day,
+        (buff) => statusActive(before, buff) !== statusActive(after, buff),
       )
-      .map((buff) => ({ buff, active: (after.buffs[buff] ?? 0) >= after.day })),
+      .map((buff) => ({ buff, active: statusActive(after, buff) })),
     jobs: after.jobs
       .filter((job) => {
         const old = before.jobs.find((j) => j.id === job.id);
         return (
-          !old || old.status !== job.status || old.readyDay !== job.readyDay
+          !old ||
+          old.status !== job.status ||
+          (job.status === 'queued' &&
+            productionReadyAt(before, old) !== productionReadyAt(after, job))
         );
       })
-      .map(({ id, recipeId, readyDay, status }) => ({
-        id,
-        recipeId,
-        readyDay,
-        status,
+      .map((job) => ({
+        id: job.id,
+        recipeId: job.recipeId,
+        readyAt: productionReadyAt(after, job),
+        status: job.status,
       })),
     sale: revenue || cost ? { revenue, cost, profit: revenue - cost } : null,
-    workRemaining:
-      action.type === 'short' || action.type === 'heavy'
-        ? Math.max(0, RULES.maxWorkPerDay - after.daily.work)
-        : null,
+    workRemaining: null,
     details: error
       ? [error]
       : after.logs

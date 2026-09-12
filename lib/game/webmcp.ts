@@ -1,5 +1,10 @@
-import { GOODS, GOOD_IDS, HOUSING, SKILLS, RECIPES } from './config.ts';
+import { citySchedule } from './time.ts';
+import { productionReadyAt } from './production-time.ts';
+import { statusActive } from './status.ts';
+import { publicOpportunities } from './market-opportunities.ts';
+import { BUFFS, GOODS, GOOD_IDS, HOUSING, SKILLS, RECIPES } from './config.ts';
 import {
+  staminaMax,
   capacity,
   occupied,
   quote,
@@ -24,7 +29,7 @@ import {
   orderTerms,
   returnTerms,
 } from './commerce.ts';
-import type { Action, GameState, OperationResult } from './types.ts';
+import type { Action, Buff, GameState, OperationResult } from './types.ts';
 
 export function publicState(s: GameState | null) {
   if (!s) return { started: false };
@@ -32,19 +37,23 @@ export function publicState(s: GameState | null) {
     started: true,
     revision: s.revision,
     day: s.day,
+    clock: s.clock,
+    home: s.home,
+    marketOpportunities: publicOpportunities(s),
+    life: s.life,
     target: s.target,
     phase: s.phase,
     cash: s.cash,
     health: s.health,
     stamina: s.stamina,
-    staminaCap: s.health >= 70 ? 100 : s.health >= 40 ? 80 : 60,
+    staminaCap: staminaMax(s),
     reputation: s.reputation,
     story: s.story,
     lastResponse: s.lastResponse,
     lastOperation: s.operationHistory.at(-1) ?? null,
     operationHistory: s.operationHistory,
-    nightPreference: s.nightPreference,
     todayTasks: todayTasks(s),
+    citySchedule: citySchedule(s.clock.minute),
     orders: s.commerce.orders.map((o) => ({
       ...o,
       preview: orderPreview(s, o),
@@ -68,6 +77,9 @@ export function publicState(s: GameState | null) {
         ),
       }),
     ),
+    statusEffects: (Object.keys(BUFFS) as Buff[])
+      .filter((id) => statusActive(s, id))
+      .map((id) => ({ id, ...BUFFS[id], expiresAt: s.buffs[id] })),
     ending: s.ending,
     housing: {
       id: s.housing.id,
@@ -134,7 +146,8 @@ export function publicState(s: GameState | null) {
         id: j.id,
         recipeId: j.recipeId,
         quantity: j.quantity,
-        readyDay: j.readyDay,
+        remainingMinutes: j.remainingMinutes,
+        readyAt: productionReadyAt(s, j),
       })),
     event: s.event
       ? {
@@ -149,7 +162,7 @@ export function publicState(s: GameState | null) {
             hint: c.hint,
             cost: {
               cash: c.cost.cash,
-              stamina: (c.cost.stamina ?? 0) + (c.cost.ap ?? 0) * 10,
+              stamina: c.cost.stamina ?? 0,
             },
           })),
         }

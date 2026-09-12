@@ -1,3 +1,6 @@
+import { relativeMoment } from './time.ts';
+import { statusActive } from './status.ts';
+import { lifeCycle, nextDailyTime, timeOfDay } from './time.ts';
 import {
   BUFFS,
   GOODS,
@@ -18,6 +21,7 @@ import type { GameState, Good } from './types.ts';
 export interface TodayTask {
   id: string;
   priority: number;
+  at?: number;
   title: string;
   detail: string;
   target: 'market' | 'production' | 'people' | 'housing' | 'intel' | 'orders';
@@ -26,7 +30,35 @@ export interface TodayTask {
 }
 export function todayTasks(s: GameState): TodayTask[] {
   const items: TodayTask[] = [];
-  if (s.health < 40 || (s.buffs.cold ?? 0) >= s.day)
+  const now = s.clock.minute;
+  if (timeOfDay(now) >= 1020 && timeOfDay(now) < 1080)
+    items.push({
+      id: 'closing',
+      priority: 0,
+      at: Math.floor(now / 1440) * 1440 + 1080,
+      title: '普通市场即将收市',
+      detail: '18:00收市，成交需在收市前完成搬运。夜市18:00开张。',
+      target: 'market',
+    });
+  if (s.life.ateCycle !== lifeCycle(now))
+    items.push({
+      id: 'meal',
+      priority: timeOfDay(now) >= 1080 || timeOfDay(now) < 360 ? 0 : 3,
+      at: nextDailyTime(now, 360),
+      title: '还没吃主餐',
+      detail: `${relativeMoment(nextDailyTime(now, 360), now)}前吃一份主餐；未吃会损失8健康。`,
+      target: 'housing',
+    });
+  if (s.clock.sleepDebt >= 4 || timeOfDay(now) >= 1320 || timeOfDay(now) < 360)
+    items.push({
+      id: 'sleep',
+      priority: 0,
+      at: now,
+      title: '安排睡眠',
+      detail: `睡眠不足${s.clock.sleepDebt.toFixed(1)}小时；短暂休息不能替代睡眠。凌晨02:00—06:00继续熬夜会损害健康，越晚越严重。`,
+      target: 'housing',
+    });
+  if (s.health < 40 || statusActive(s, 'cold'))
     items.push({
       id: 'health',
       priority: 0,
@@ -40,12 +72,15 @@ export function todayTasks(s: GameState): TodayTask[] {
     });
   if (
     s.hens.length &&
-    quantity(s, 'grain') < s.hens.length * (s.skills.husbandry >= 3 ? 0.1 : 0.2)
+    quantity(s, 'grain') <
+      s.hens.filter((h) => !s.life.fed.includes(h.id)).length *
+        (s.skills.husbandry >= 3 ? 0.1 : 0.2)
   )
     items.push({
       id: 'feed',
       priority: 0,
-      title: '今晚饲料不足',
+      at: nextDailyTime(now, 330),
+      title: '未喂母鸡的饲料不足',
       detail: '全部母鸡的饲料尚未备齐。',
       target: 'market',
       good: 'grain',
@@ -64,16 +99,19 @@ export function todayTasks(s: GameState): TodayTask[] {
       ([g, q]) =>
         s.batches
           .filter(
-            (b) => b.good === g && (b.expires === null || b.expires >= s.day),
+            (b) =>
+              b.good === g &&
+              (b.remainingMinutes == null || b.remainingMinutes > 0),
           )
           .reduce((n, b) => n + b.units / 10, 0) >= q!,
     );
-    if (o.deadline <= s.day + 1 || ready)
+    if (o.deadlineAt <= now + 1440 || ready)
       items.push({
         id: `order:${o.id}`,
-        priority: o.deadline <= s.day + 1 ? 0 : 2,
+        priority: o.deadlineAt <= now + 1440 ? 0 : 2,
+        at: o.deadlineAt,
         title: ready ? `可以交付：${o.title}` : `订单临近截止：${o.title}`,
-        detail: `第${o.deadline}日白天截止；违约损失保证金${o.deposit}文和客户关系。`,
+        detail: `${relativeMoment(o.deadlineAt, now)}截止（还剩${Math.max(0, Math.floor((o.deadlineAt - now) / 60))}小时）；违约损失保证金${o.deposit}文和客户关系。`,
         target: 'orders',
         preference: ['orders.selected', o.id],
       });
@@ -81,15 +119,25 @@ export function todayTasks(s: GameState): TodayTask[] {
   for (const good of Object.keys(GOODS) as Good[]) {
     const expiring = s.batches
       .filter(
-        (b) => b.good === good && b.expires !== null && b.expires <= s.day,
+        (b) =>
+          b.good === good &&
+          b.remainingMinutes != null &&
+          b.remainingMinutes <= 1440,
       )
       .reduce((n, b) => n + b.units / 10, 0);
     if (expiring)
       items.push({
         id: `expiry:${good}`,
         priority: 1,
-        title: `${GOODS[good].name}今日临期`,
-        detail: `${expiring}${GOODS[good].unit}将在今夜结束时丢弃。`,
+        at:
+          now +
+          Math.min(
+            ...s.batches
+              .filter((b) => b.good === good && b.remainingMinutes != null)
+              .map((b) => b.remainingMinutes!),
+          ),
+        title: `${GOODS[good].name}临近腐坏`,
+        detail: `${expiring}${GOODS[good].unit}的保鲜时间不足24小时，离开凉储后按正常速度腐坏。`,
         target: 'market',
         good,
       });
@@ -172,6 +220,9 @@ export function todayTasks(s: GameState): TodayTask[] {
       target: 'market',
     });
   return items.sort(
-    (a, b) => a.priority - b.priority || a.id.localeCompare(b.id),
+    (a, b) =>
+      (a.at ?? Infinity) - (b.at ?? Infinity) ||
+      a.priority - b.priority ||
+      a.id.localeCompare(b.id),
   );
 }

@@ -1,10 +1,11 @@
+import { setDay } from './helpers.ts';
 import { measureLayout } from './layout-check.mjs';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { newGame, dispatch } from '../lib/game/engine.ts';
+import { newGame, dispatch, readSave } from '../lib/game/engine.ts';
 import { EVENTS, INFO_TEMPLATES } from '../lib/game/content.ts';
-import { EQUIPMENT_IDS, GOOD_IDS, BUFFS } from '../lib/game/config.ts';
+import { EQUIPMENT_IDS, GOOD_IDS, GOODS, BUFFS } from '../lib/game/config.ts';
 const output = 'tests/browser-output';
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -13,12 +14,13 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v2')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
 const load = async (s) => {
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     for (const key of Object.keys(localStorage))
       if (key.startsWith('bianliang-ui:')) localStorage.removeItem(key);
-    localStorage.setItem('bianliang-save-v2', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
   }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -41,7 +43,8 @@ async function layout(label) {
 
   await page.screenshot({ path: `${output}/${label}.png` });
   assert(
-    m.pageHeight <= m.height + 1 && m.pageWidth <= m.width + 1,
+    (m.width < 1000 || m.pageHeight <= m.height + 1) &&
+      m.pageWidth <= m.width + 1,
     `${label} page overflow ${JSON.stringify(m)}`,
   );
   assert.equal(
@@ -66,8 +69,10 @@ try {
   const downloadPromise = page.waitForEvent('download');
   await button('导出存档').click();
   assert(
-    (await downloadPromise).suggestedFilename().includes('bianliang-save-v2'),
+    (await downloadPromise).suggestedFilename().includes('bianliang-save-v3'),
   );
+  await button('等待30分钟').click();
+  await button('等待30分钟').click();
   await button('情报').click();
   await button('茶馆听消息 · 8文').click();
   const tea = await read();
@@ -82,11 +87,14 @@ try {
   assert((await read()).intel.some((i) => i.asked));
   assert.match(await page.locator('.detail').innerText(), /追问所得：/);
   const developed = newGame(20260910, 30000);
-  developed.day = 100;
+  setDay(developed, 100);
+  developed.nextId = 1200;
   developed.cash = 25000;
   developed.skills = { husbandry: 3, food: 3, textile: 3, brewing: 3 };
   developed.skillXp = { husbandry: 99, food: 99, textile: 99, brewing: 99 };
-  developed.buffs = Object.fromEntries(Object.keys(BUFFS).map((k) => [k, 101]));
+  developed.buffs = Object.fromEntries(
+    Object.keys(BUFFS).map((k) => [k, developed.clock.minute + 1440]),
+  );
   developed.housing = {
     id: 'mansion',
     paidThrough: null,
@@ -104,7 +112,8 @@ try {
     good,
     units: 100,
     cost: 100,
-    expires: null,
+
+    remainingMinutes: GOODS[good].life ? GOODS[good].life * 1440 : null,
     origin: 'buy',
   }));
   const sample = dispatch(newGame(1), { type: 'short' }).result;
@@ -112,6 +121,8 @@ try {
     ...structuredClone(sample),
     id: 900 + i,
     day: i + 1,
+    startedAt: i * 1440 + 480,
+    finishedAt: i * 1440 + 600,
     details: [`完整记录条目${i + 1}，货物与现金已经核对。`],
     items: GOOD_IDS.map((good) => ({ good, quantity: 1 })),
   }));
@@ -123,7 +134,8 @@ try {
       (e) => e.kind === (i ? 'brewVat' : 'pickleVat'),
     ).id,
     startDay: 99,
-    readyDay: 102 + i,
+
+    remainingMinutes: (2 + i) * 1440,
     inputCost: 300,
     outputUnits: 800,
     status: 'queued',
@@ -193,6 +205,9 @@ try {
     await layout('资产持有清单-' + category);
   }
   const inProgress = structuredClone(developed);
+  inProgress.equipment.forEach((e) => {
+    e.jobId = null;
+  });
   const vat = inProgress.equipment.find((e) => e.kind === 'brewVat');
   vat.jobId = 950;
   inProgress.jobs = [
@@ -202,7 +217,8 @@ try {
       quantity: 2,
       equipmentId: vat.id,
       startDay: 100,
-      readyDay: 102,
+
+      remainingMinutes: 2880,
       inputCost: 240,
       outputUnits: 80,
       status: 'queued',
@@ -216,8 +232,13 @@ try {
   await layout('资产在制品');
   await load(original);
   await button('人物').click();
+  await button('街巷').click();
   await button('短工 · 25文').click();
   assert.match(await page.locator('.record-feed').innerText(), /现金\s*\+25文/);
+  assert.match(
+    await page.locator('.record-feed').innerText(),
+    /实际用时120分钟/,
+  );
   await layout('顶部操作响应');
   const states = [
     ['初始', original],
@@ -227,6 +248,7 @@ try {
     [1536, 864],
     [1920, 900],
     [1920, 1080],
+    [390, 844],
   ]) {
     await page.setViewportSize({ width: w, height: h });
     for (const [name, s] of states) {
@@ -254,10 +276,17 @@ try {
       await button('设备').click();
       await layout(`${w}x${h}-${name}-设备`);
     }
-    await load({ ...developed, phase: 'night' });
-    await layout(`${w}x${h}-夜间`);
-    await page.getByLabel('喂鸡数量').fill('99');
-    await layout(`${w}x${h}-夜间错误`);
+    const evening = structuredClone(developed);
+    setDay(evening, 100, 1320);
+    await load(evening);
+    await button('住宅').click();
+    await button('生活').click();
+    await layout(`${w}x${h}-夜间生活`);
+    await page.getByLabel('睡眠小时').fill('11');
+    assert(
+      await page.getByRole('button', { name: /^入睡 · 醒于/ }).isDisabled(),
+    );
+    await layout(`${w}x${h}-睡眠错误`);
     const variants = EVENTS.flatMap((f) =>
       f.variants.map((v) => ({ f, v })),
     ).sort(
@@ -297,6 +326,7 @@ try {
       .evaluate((e) => (e.scrollTop = e.scrollHeight));
     await layout(`${w}x${h}-市场末页`);
   }
+  await page.setViewportSize({ width: 1536, height: 864 });
   // Visible-control transaction and fatigue confirmation.
   await load(original);
   await page.getByLabel('粟米数量').fill('1.5');
@@ -307,41 +337,32 @@ try {
   assert.equal((await read()).phase, 'day');
   await load({ ...original, stamina: 40 });
   await button('人物').click();
+  await button('街巷').click();
   await button('重活 · 40文').click();
-  await page.getByRole('dialog').waitFor();
-  assert.equal((await read()).stamina, 40);
-  await button('确认执行').click();
-  assert.equal((await read()).health, 98);
+  assert.equal((await read()).stamina, 0);
+  assert.equal((await read()).health, 100);
   // Production with insufficient cash/materials gives visible reasons, not silent click failures.
   await load({ ...developed, cash: 0, stamina: 0 });
   await button('生产').click();
   await layout('1536-invalid-production');
   assert(await button('开工').isDisabled());
-  const legacy = structuredClone(original);
-  delete legacy.ledger.purchases;
-  delete legacy.saveRevision;
-  delete legacy.operationHistory;
-  await load(legacy);
-  await button('人物').click();
-  await button('休息 · 恢复25体力').click();
-  assert.deepEqual(
-    JSON.parse(
-      await page.evaluate(() =>
-        localStorage.getItem('bianliang-save-v2-before-ux-revision-2'),
-      ),
-    ),
-    legacy,
+  const legacy = { ...original, version: 2 };
+  await page.evaluate(
+    (raw) => localStorage.setItem('bianliang-save-v3', raw),
+    JSON.stringify(legacy),
   );
-  assert(await button('导出修复前备份').isVisible());
-  await layout('legacy-backup-header');
+  await page.reload();
+  await page.getByText(/存档损坏或版本不兼容/).waitFor();
+  assert.deepEqual(await read(), legacy);
+  await layout('incompatible-save-preserved');
   await page.evaluate(() =>
-    localStorage.setItem('bianliang-save-v2', '{"broken":true}'),
+    localStorage.setItem('bianliang-save-v3', '{"broken":true}'),
   );
   await page.reload();
   await page.getByText(/存档损坏或版本不兼容/).waitFor();
   await button('挑战三万文').click();
   assert.equal(
-    await page.evaluate(() => localStorage.getItem('bianliang-save-v2')),
+    await page.evaluate(() => localStorage.getItem('bianliang-save-v3')),
     '{"broken":true}',
   );
   await button('保留当前旅程').click();
@@ -355,13 +376,13 @@ try {
         metrics,
         errors,
         scope:
-          'desktop only; 1536×864, 1920×900, 1920×1080; no mobile requirement',
+          '1536×864, 1920×900, 1920×1080 desktop and 390×844 mobile; mobile permits vertical scrolling',
       },
       null,
       2,
     ),
   );
-  console.log('Desktop browser checks passed', metrics.length);
+  console.log('Desktop and mobile browser checks passed', metrics.length);
 } catch (e) {
   writeFileSync(
     `${output}/failure.json`,

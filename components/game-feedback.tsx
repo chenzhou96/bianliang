@@ -1,5 +1,8 @@
 'use client';
 
+import { TRADE_REWARDS } from '@/lib/game/market-opportunities';
+import { formatMoment } from '@/lib/game/time';
+
 import { useEffect, useState } from 'react';
 import {
   BUFFS,
@@ -108,7 +111,9 @@ export function OperationFeedback({
                 <span key={j.id}>
                   {RECIPE_MAP[j.recipeId]?.name}{' '}
                   {j.status === 'queued'
-                    ? `第${j.readyDay}日完工`
+                    ? j.readyAt === null
+                      ? '暂停加工'
+                      : `${formatMoment(j.readyAt)}完工`
                     : j.status === 'ready'
                       ? '已完工入库'
                       : '已放弃'}
@@ -160,13 +165,18 @@ export function OperationDetails({ result }: { result: OperationResult }) {
       (j) =>
         (RECIPE_MAP[j.recipeId]?.name ?? j.recipeId) +
         (j.status === 'queued'
-          ? '：第' + j.readyDay + '日完工'
+          ? j.readyAt === null
+            ? '：暂停加工'
+            : `：${formatMoment(j.readyAt)}完工`
           : j.status === 'ready'
             ? '：已完工入库'
             : '：已放弃'),
     ),
     ...(result.customers ?? []).map(
       (c) => CUSTOMERS[c.id].name + '关系 ' + signed(c.change),
+    ),
+    ...(result.tradeMilestones ?? []).map(
+      (id) => `获得纪念物：${TRADE_REWARDS[id].name}`,
     ),
     ...(result.milestones ?? []).map(
       (id) => '达成：' + MILESTONES.find((m) => m.id === id)?.name,
@@ -177,6 +187,10 @@ export function OperationDetails({ result }: { result: OperationResult }) {
       <h3>
         第{result.day}日 · {result.title}
       </h3>
+      <small>
+        {formatMoment(result.startedAt)} → {formatMoment(result.finishedAt)}
+        {' · '}实际用时{result.finishedAt - result.startedAt}分钟
+      </small>
       <p>
         现金 {signed(result.cash)}文 · 健康 {signed(result.health)} · 体力{' '}
         {signed(result.stamina)}
@@ -199,6 +213,10 @@ export function OperationDetails({ result }: { result: OperationResult }) {
 
 export function celebration(result: OperationResult | undefined, s: GameState) {
   if (!result?.success) return '';
+  if (result.tradeMilestones?.length)
+    return result.tradeMilestones
+      .map((id) => `获得「${TRADE_REWARDS[id].name}」，可在商人生涯回看。`)
+      .join(' ');
   if (result.milestones?.length)
     return (
       result.milestones

@@ -1,8 +1,10 @@
+import { todayTasks } from '../lib/game/today.ts';
+import { setDay } from './helpers.ts';
 import { measureLayout } from './layout-check.mjs';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { newGame, dispatch } from '../lib/game/engine.ts';
+import { newGame, dispatch, readSave } from '../lib/game/engine.ts';
 import {
   generateOrders,
   orderTerms,
@@ -21,11 +23,12 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v2')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
 async function load(s) {
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     localStorage.clear();
-    localStorage.setItem('bianliang-save-v2', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
   }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -37,8 +40,13 @@ async function layout(label) {
   await page.screenshot({
     animations: 'disabled',
     path: `${output}/${label}.png`,
+    fullPage: m.width < 1000,
   });
-  assert(m.pageHeight <= m.height + 1 && m.pageWidth <= m.width + 1);
+  assert(
+    (m.width < 1000 || m.pageHeight <= m.height + 1) &&
+      m.pageWidth <= m.width + 1,
+    `${label}: ${JSON.stringify(m)}`,
+  );
   assert.deepEqual(m.bad, [], `${label}: ${JSON.stringify(m.bad)}`);
 }
 try {
@@ -46,7 +54,7 @@ try {
   let fixture;
   for (let seed = 1; seed < 50; seed++) {
     const s = newGame(seed, 30000);
-    s.day = 4;
+    setDay(s, 4);
     s.cash = 20000;
     s.stamina = 100;
     s.encounterDay = 4;
@@ -69,7 +77,8 @@ try {
     good,
     units: q * 10,
     cost: Math.floor(q * fixture.prices[good].buy * 0.6),
-    expires: null,
+
+    remainingMinutes: GOODS[good].life ? GOODS[good].life * 1440 : null,
     origin: 'buy',
   }));
   fixture.nextId = 1000;
@@ -160,46 +169,49 @@ try {
     await layout(`${w}x${h}-today`);
     await page.keyboard.press('Escape');
     const night = structuredClone(developed);
-    night.day = target.deadline;
-    night.commerce.generatedDay = 0;
-    night.phase = 'night';
-    night.batches.forEach((b) => (b.expires = night.day));
+    setDay(night, Math.floor(target.deadlineAt / 1440) + 1, 1140);
+    night.batches.forEach((b) => {
+      if (GOODS[b.good].life) b.remainingMinutes = 60;
+    });
     await load(night);
-    await button(
-      '到期提醒 (' +
-        (night.batches.length +
-          night.commerce.orders.filter(
-            (o) => o.status === 'accepted' && o.deadline <= night.day,
-          ).length) +
-        ')',
-    ).click();
-    await layout(`${w}x${h}-night-risk`);
-    assert.match(await page.getByRole('dialog').innerText(), /今夜将违约/);
+    await page.getByRole('button', { name: /^今日要事/ }).click();
+    assert.deepEqual(
+      await page.locator('.today-task strong').allTextContents(),
+      todayTasks(night).map((task) => task.title),
+    );
+    await layout(`${w}x${h}-deadline-risk`);
+    assert.match(await page.getByRole('dialog').innerText(), /20:00截止/);
     await page.keyboard.press('Escape');
   }
   const busyNight = structuredClone(developed);
-  busyNight.day = target.deadline;
-  busyNight.phase = 'night';
+  setDay(busyNight, Math.floor(target.deadlineAt / 1440) + 1, 1140);
   busyNight.cash = 123456789012;
   busyNight.batches = GOOD_IDS.filter((g) => g !== 'hen').map((g) => ({
     id: busyNight.nextId++,
     good: g,
     units: 10,
     cost: 10,
-    expires: busyNight.day,
+
+    remainingMinutes: GOODS[g].life ? 60 : null,
     origin: 'buy',
   }));
   busyNight.buffs = Object.fromEntries(
-    Object.keys(BUFFS).map((id) => [id, busyNight.day]),
+    Object.keys(BUFFS).map((id) => [id, busyNight.clock.minute + 60]),
   );
   const settled = dispatch(busyNight, {
-    type: 'night',
-    meal: 'diner',
+    type: 'sleep',
+    minutes: 600,
     bed: 'mansion',
-    feed: 0,
   });
   assert.equal(settled.error, undefined);
-  assert(settled.result.items.length > 10);
+  assert.equal(
+    settled.result.items.length,
+    GOOD_IDS.filter((g) => g !== 'hen' && GOODS[g].life).length,
+  );
+  assert.equal(
+    settled.state.commerce.orders.find((o) => o.id === target.id).status,
+    'failed',
+  );
   for (const [w, h] of [
     [1536, 864],
     [1920, 900],
@@ -207,7 +219,10 @@ try {
   ]) {
     await page.setViewportSize({ width: w, height: h });
     await load(settled.state);
-    await layout(w + 'x' + h + '-night-summary');
+    await button('住宅').click();
+    await button('生活').click();
+    await page.locator('.wake-summary summary').click();
+    await layout(w + 'x' + h + '-sleep-summary');
     await page
       .locator('.record-feed')
       .evaluate((e) => (e.scrollTop = e.scrollHeight));
@@ -244,6 +259,46 @@ try {
   });
   assert.match(await page.locator('.detail').innerText(), /药材|茶叶|酒/);
   await layout('art-text-fallback');
+  for (const [width, height] of [
+    [1536, 864],
+    [1920, 900],
+    [1920, 1080],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width, height });
+    const trusted = structuredClone(developed);
+    trusted.event = null;
+    trusted.health = 88.333333333333;
+    for (const id of CUSTOMER_IDS) {
+      trusted.commerce.relations[id] = 10;
+      trusted.commerce.customers[id] = {
+        met: true,
+        visited: 3,
+        lastOutcome: null,
+      };
+    }
+    await load(trusted);
+    await button('订单').click();
+    await button('熟客').click();
+    for (const id of CUSTOMER_IDS) {
+      await page
+        .locator('.list-item')
+        .filter({ hasText: CUSTOMERS[id].name })
+        .click();
+      await button('拜访与回访').click();
+      assert.ok(
+        (await page.locator('.detail').innerText()).includes(
+          CUSTOMERS[id].stories[3],
+        ),
+      );
+      assert.match(await page.locator('.detail').innerText(), /4\/4/);
+      assert.ok(await button('拜访与回访').isDisabled());
+    }
+    assert.match(await page.locator('.vital').first().innerText(), /88.3\/100/);
+    const saved = await read();
+    assert.deepEqual(readSave(JSON.stringify(saved)), saved);
+    await layout(`${width}x${height}-至交后续`);
+  }
   assert.deepEqual(errors, []);
   writeFileSync(
     `${output}/result.json`,

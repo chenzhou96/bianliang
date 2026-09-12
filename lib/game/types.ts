@@ -1,3 +1,7 @@
+import type { MarketOpportunities } from './market-opportunities.ts';
+import type { HomeAssets, FacilityKind } from './home.ts';
+import type { Transport } from './time.ts';
+import type { GameClock } from './time.ts';
 export type Good =
   | 'grain'
   | 'wheat'
@@ -25,7 +29,7 @@ export type Bed =
   | 'courtyard'
   | 'yard'
   | 'mansion';
-export type Phase = 'day' | 'market' | 'night' | 'ended';
+export type Phase = 'day' | 'ended';
 export type Buff = 'outsider' | 'regular' | 'tired' | 'cold' | 'warm';
 export type SkillId = 'husbandry' | 'food' | 'textile' | 'brewing';
 export type HousingId = 'street' | 'room' | 'courtyard' | 'yard' | 'mansion';
@@ -39,11 +43,11 @@ export type EquipmentKind =
   | 'brewVat';
 
 export interface Batch {
+  remainingMinutes: number | null;
   id: number;
   good: Good;
   units: number;
   cost: number;
-  expires: number | null;
   origin: 'buy' | 'gift' | 'production';
 }
 export interface Price {
@@ -71,7 +75,7 @@ export interface EventChoice {
   id: string;
   label: string;
   hint: string;
-  cost: { cash?: number; stamina?: number; ap?: number };
+  cost: { cash?: number; stamina?: number };
   outcomes: OutcomeDefinition[];
 }
 export interface EventVariant {
@@ -104,7 +108,7 @@ export interface EventInstance {
 export interface ScheduledFollowUp {
   chain: 'widow' | 'porter';
   person: string;
-  due: number;
+  dueAt: number;
   branch: 'gift' | 'work' | 'request';
   source: number;
 }
@@ -173,12 +177,12 @@ export interface Equipment {
   jobId: number | null;
 }
 export interface ProductionJob {
+  remainingMinutes: number;
   id: number;
   recipeId: string;
   quantity: number;
   equipmentId: number;
   startDay: number;
-  readyDay: number;
   inputCost: number;
   outputUnits: number;
   status: 'queued' | 'ready' | 'abandoned';
@@ -235,13 +239,17 @@ export interface Ledger {
   housing: number;
   living: number;
   feed: number;
+  social: number;
   medical: number;
   workIncome: number;
 }
 
 export interface OperationResult {
+  startedAt: number;
+  finishedAt: number;
   depositLoss?: number;
   milestones?: string[];
+  tradeMilestones?: string[];
   customers?: { id: CustomerId; change: number }[];
   id: number;
   day: number;
@@ -259,7 +267,7 @@ export interface OperationResult {
   jobs: {
     id: number;
     recipeId: string;
-    readyDay: number;
+    readyAt: number | null;
     status: ProductionJob['status'];
   }[];
   sale: { revenue: number; cost: number; profit: number } | null;
@@ -268,15 +276,25 @@ export interface OperationResult {
 }
 
 export interface GameState {
+  pendingTrade?: {
+    cash: number;
+    batches: Batch[];
+    hens: { id: number; hunger: number; cost: number }[];
+    units: number;
+  };
+  clock: GameClock;
+  home: HomeAssets;
+  marketOffers: MarketOpportunities;
+  life: {
+    ateCycle: number;
+    fed: number[];
+    autoFeed: boolean;
+    lastDawn: number;
+    wakeSummary: { at: number; lines: string[] } | null;
+  };
   commerce: CommerceState;
   saveRevision: number;
   operationHistory: OperationResult[];
-  nightPreference: {
-    meal: Meal;
-    bed: Bed;
-    feedMode: 'all' | 'fixed';
-    feed: number;
-  } | null;
   version: number;
   rules: string;
   seed: number;
@@ -293,6 +311,7 @@ export interface GameState {
   weather: string;
   batches: Batch[];
   hens: { id: number; hunger: number; cost: number }[];
+  /** Absolute expiry minute; inactive exactly at this timestamp. */
   buffs: Partial<Record<Buff, number>>;
   prices: Record<Good, Price>;
   history: { day: number; prices: Record<Good, Price> }[];
@@ -305,9 +324,11 @@ export interface GameState {
   followups: ScheduledFollowUp[];
   relations: Record<string, number>;
   seen: string[];
+  /** Earliest absolute minute each encounter family can recur. */
   cooldowns: Record<string, number>;
   familyCounts: Record<string, number>;
   intel: IntelEntry[];
+  /** Absolute next-eligible minute for semantic, skeleton and market keys. */
   intelSeen: Record<string, number>;
   skills: Record<SkillId, number>;
   skillXp: Record<SkillId, number>;
@@ -344,8 +365,32 @@ export interface GameState {
 }
 
 export type Action =
+  | { type: 'buyLot'; lotId: string; transport?: Transport }
+  | {
+      type: 'supplyRequest';
+      requestId: string;
+      quantity: number;
+      transport?: Transport;
+    }
+  | { type: 'reserveRequest'; requestId: string }
+  | { type: 'host'; customer: CustomerId }
+  | { type: 'buyCart' }
+  | {
+      type: 'installFacility' | 'removeFacility' | 'sellFacility';
+      facility: FacilityKind;
+    }
+  | { type: 'coldPriority'; goods: Good[] }
+  | { type: 'eat'; meal: Exclude<Meal, 'none'> }
+  | { type: 'feed'; count: number }
+  | { type: 'sleep'; minutes: number; bed: Bed }
+  | { type: 'wait'; minutes: number }
+  | { type: 'autoFeed'; enabled: boolean }
   | { type: 'acceptOrder'; orderId: number; confirm?: string }
-  | { type: 'deliverOrder' | 'abandonOrder' | 'declineOrder'; orderId: number }
+  | {
+      type: 'deliverOrder' | 'abandonOrder' | 'declineOrder';
+      orderId: number;
+      transport?: Transport;
+    }
   | { type: 'meetCustomer' | 'visitCustomer'; customerId: CustomerId }
   | {
       type:
@@ -355,11 +400,9 @@ export type Action =
         | 'short'
         | 'heavy'
         | 'rest'
-        | 'endDay'
         | 'stay'
         | 'inspect'
-        | 'snack'
-        | 'returnDay';
+        | 'snack';
     }
   | { type: 'return'; confirm?: string }
   | { type: 'treat'; mode: 'fast' | 'slow' }
@@ -373,9 +416,14 @@ export type Action =
   | { type: 'produce'; recipeId: string; quantity: number }
   | { type: 'refill'; recipeId: string; quantity: number }
   | { type: 'cancelProduction'; jobId: number }
-  | { type: 'trade'; good: Good; quantity: number; side: 'buy' | 'sell' }
-  | { type: 'choice'; id: string; eventId: number }
-  | { type: 'night'; meal: Meal; bed: Bed; feed: number; feedAll?: boolean };
+  | {
+      type: 'trade';
+      good: Good;
+      quantity: number;
+      side: 'buy' | 'sell';
+      transport?: Transport;
+    }
+  | { type: 'choice'; id: string; eventId: number };
 
 export type CustomerId =
   | 'baker'
@@ -403,7 +451,8 @@ export interface Order {
   deposit: number;
   highRisk: boolean;
   postedDay: number;
-  deadline: number;
+  /** Absolute completion deadline in game minutes. */
+  deadlineAt: number;
   status: OrderStatus;
   settledDay: number | null;
 }

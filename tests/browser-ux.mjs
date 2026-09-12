@@ -2,7 +2,7 @@ import { measureLayout } from './layout-check.mjs';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { newGame } from '../lib/game/engine.ts';
+import { newGame, readSave } from '../lib/game/engine.ts';
 
 const out = 'tests/browser-output/ux';
 mkdirSync(out, { recursive: true });
@@ -12,11 +12,12 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v2')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
 async function load(s) {
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     localStorage.clear();
-    localStorage.setItem('bianliang-save-v2', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
   }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -36,6 +37,7 @@ try {
   s.skills.food = 1;
   s.housing.id = 'room';
   s.equipment = [{ id: 900, kind: 'stove', installed: true, jobId: null }];
+  s.nextId = 901;
   s.batches = [];
   await load(s);
   let clicks = 0,
@@ -84,34 +86,33 @@ try {
   await page.getByLabel('减少动态').uncheck();
   await load(newGame(20260911));
   await button('人物').click();
-  await button('休息 · 恢复25体力').click();
-  assert.match(await page.locator('.record-feed').innerText(), /体力\s*\+20/);
+  await button('休息1小时 · 恢复20体力').click();
+  assert.match(await page.locator('.record-feed').innerText(), /体力\s*\+18.5/);
+  await button('街巷').click();
   await button('短工 · 25文').click();
   assert.match(await page.locator('.record-feed').innerText(), /现金\s*\+25文/);
-  await button('收工，安排今晚 →').click();
-  await page.getByLabel('晚饭', { exact: true }).selectOption('diner');
+  await button('住宅').click();
+  await button('生活').click();
+  await page.getByLabel('主餐', { exact: true }).selectOption('diner');
+  await button('用主餐 · 30分钟').click();
   await page.getByLabel('住宿', { exact: true }).selectOption('inn');
-  await button('安排妥当，度过这一夜 →').click();
-  assert.equal((await read()).nightPreference.meal, 'diner');
+  const beforeSleep = await read();
+  await page.getByRole('button', { name: /^入睡 · 醒于/ }).click();
   const saved = await read();
-  saved.event = null;
-  saved.encounterDay = saved.day;
-  await load(saved);
-  await button('收工，安排今晚 →').click();
-  assert.equal(
-    await page.getByLabel('晚饭', { exact: true }).inputValue(),
-    'diner',
-  );
-  await button('返回白天处理').click();
-  assert.equal((await read()).day, saved.day);
+  assert.equal(saved.clock.minute, beforeSleep.clock.minute + 480);
+  assert.equal(saved.cash, beforeSleep.cash - 30);
+  assert.ok(saved.life.wakeSummary);
+  await button('市场').click();
+  await button('住宅').click();
+  assert.equal((await read()).clock.minute, saved.clock.minute);
   const learning = newGame(20);
   learning.cash = 5000;
   learning.health = 60;
-  learning.buffs.cold = learning.day + 1;
+  learning.buffs.cold = learning.clock.minute + 2880;
   await load(learning);
   await button('人物').click();
   await button('调养 · 30文 / +10健康').click();
-  assert.match(await page.locator('.record-feed').innerText(), /健康\s*\+10/);
+  assert.match(await page.locator('.record-feed').innerText(), /健康\s*\+9.75/);
   assert.match(await page.locator('.record-feed').innerText(), /风寒：解除/);
   await page.locator('.list-item').filter({ hasText: '食品' }).click();
   await page.getByRole('button', { name: /^学习 ·/ }).click();
@@ -119,24 +120,16 @@ try {
   assert.match(await page.locator('.record-feed').innerText(), /进阶1级/);
   await button('收下这份喜悦').click();
   await noOverflow('learned-and-treated');
-  const invalidBed = structuredClone(learning);
-  invalidBed.phase = 'night';
-  invalidBed.nightPreference = {
-    meal: 'diner',
-    bed: 'mansion',
-    feedMode: 'all',
-    feed: 0,
-  };
-  await load(invalidBed);
-  assert.match(
+  await load(learning);
+  await button('住宅').click();
+  await button('生活').click();
+  assert.doesNotMatch(
     await page.getByLabel('住宿', { exact: true }).innerText(),
-    /已不可用/,
+    /宅邸/,
   );
-  assert(await button('安排妥当，度过这一夜 →').isDisabled());
+  await page.getByLabel('睡眠小时', { exact: true }).fill('11');
+  assert(await page.getByRole('button', { name: /^入睡 · 醒于/ }).isDisabled());
   const legacy = newGame(19);
-  delete legacy.saveRevision;
-  delete legacy.operationHistory;
-  delete legacy.nightPreference;
   await load(legacy);
   await page.evaluate(() => {
     const original = Object.getOwnPropertyDescriptor(
@@ -144,12 +137,13 @@ try {
       'setItem',
     ).value;
     Storage.prototype.setItem = function (key, value) {
-      if (key.includes('before-ux-'))
+      if (key === 'bianliang-save-v3')
         throw new DOMException('Quota', 'QuotaExceededError');
       return original.call(this, key, value);
     };
   });
   await button('人物').click();
+  await button('街巷').click();
   await button('短工 · 25文').click();
   assert.match(
     await page.locator('.save-alert').innerText(),
@@ -158,7 +152,7 @@ try {
   assert.deepEqual(await read(), legacy);
   const downloading = page.waitForEvent('download');
   await button('导出当前进度').click();
-  assert((await downloading).suggestedFilename().includes('bianliang-save-v2'));
+  assert((await downloading).suggestedFilename().includes('bianliang-save-v3'));
   await noOverflow('save-failure');
   assert.deepEqual(errors, []);
   writeFileSync(

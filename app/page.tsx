@@ -1,4 +1,28 @@
 'use client';
+import { productionCompletionLabel } from '@/lib/game/production-time';
+import {
+  publicOpportunities,
+  lotDescription,
+} from '../lib/game/market-opportunities.ts';
+import {
+  CUSTOMERS as HOME_CUSTOMERS,
+  CUSTOMER_IDS as HOME_CUSTOMER_IDS,
+} from '../lib/game/commerce.ts';
+import {
+  HOME_STORIES,
+  FACILITIES,
+  usedHomeSlots,
+  type FacilityKind,
+} from '../lib/game/home.ts';
+import { transportQuote, type Transport } from '../lib/game/time.ts';
+import {
+  relativeMoment,
+  citySchedule,
+  formatClock,
+  dayPeriod,
+  nextDailyTime,
+  lifeCycle,
+} from '../lib/game/time.ts';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { GoodIcon, GameIcon, StatusIcon } from '@/components/game-icons';
 import {
@@ -34,7 +58,6 @@ import {
   reserved,
   achievements,
   readSave,
-  nightPreview,
   staminaMax,
   active,
   inventoryCost,
@@ -73,13 +96,14 @@ import type {
   Buff,
 } from '@/lib/game/types';
 
-const SAVE = 'bianliang-save-v2';
+const SAVE = 'bianliang-save-v3';
 const money = (n: number) => `${n.toLocaleString('zh-CN')}文`;
 const num = (n: number) => Math.round(n * 10) / 10;
 type Act = (a: Action) => void;
 const FeedbackContext = createContext<OperationResult | undefined>(undefined);
 type Props = { s: GameState; act: Act };
 const tabs = {
+  street: '街巷',
   market: '市场',
   assets: '资产',
   production: '生产',
@@ -135,8 +159,27 @@ function Do({
       <Btn disabled={!!p.error} onClick={() => act(action)}>
         {children}
       </Btn>
-      {p.energy > 0 && <small>{p.energy}体力</small>}
+      {p.minutes > 0 && (
+        <small>
+          {p.minutes}分钟 · 完成于{relativeMoment(p.finishAt, s.clock.minute)}
+        </small>
+      )}
+      {p.energy > 0 && <small>{Math.ceil(p.energy)}体力</small>}
+      {action.type === 'sleep' && !p.error && (
+        <small>
+          预计体力{num(s.stamina + (p.staminaChange ?? 0))} · 健康变化
+          {num(p.healthChange ?? 0)} · 现金变化
+          {p.cashChange === null
+            ? '不确定（存在失窃风险）'
+            : money(p.cashChange)}
+        </small>
+      )}
       {p.error && <small className="reason">{p.error}</small>}
+      {p.error && p.nextOpeningAt !== null && (
+        <small>
+          下次可办理：{relativeMoment(p.nextOpeningAt, s.clock.minute)}
+        </small>
+      )}
       {!p.error && p.warning && <small className="reason">{p.warning}</small>}
       {matched && (
         <small className={latest.success ? 'inline-success' : 'reason'}>
@@ -165,7 +208,192 @@ function Frame({
     </section>
   );
 }
+function MarketOpportunitiesView({ s, act }: Props) {
+  const [transport, setTransport] = useState<Transport>('self');
+  const [counts, setCounts] = useState<Record<string, string>>({});
+  const offers = publicOpportunities(s);
+  return (
+    <>
+      <label>
+        搬运方式
+        <select
+          aria-label="机会搬运方式"
+          value={transport}
+          onChange={(e) => setTransport(e.target.value as Transport)}
+        >
+          <option value="self">自己搬</option>
+          <option value="cart" disabled={!s.home.cart}>
+            手推车
+          </option>
+          <option value="porter">雇脚夫</option>
+        </select>
+      </label>
+      <div className="split">
+        <div className="list-column">
+          <h2>限量收购</h2>
+          {offers.requests.map((r) => (
+            <div className="detail" key={r.id}>
+              <strong>
+                {HOME_CUSTOMERS[r.customer].name} · 收{GOODS[r.good].name}
+              </strong>
+              <p>
+                每{GOODS[r.good].unit}
+                {r.price}文 · 还收{r.remaining} · 第
+                {Math.floor(r.deadline / 1440) + 1}日{formatClock(r.deadline)}
+                截止{r.reservedUntil ? ' · 已预留' : ''}
+              </p>
+              <input
+                aria-label={`${r.id}交货数量`}
+                type="number"
+                min="1"
+                max={r.remaining}
+                value={counts[r.id] ?? '1'}
+                onChange={(e) =>
+                  setCounts({ ...counts, [r.id]: e.target.value })
+                }
+              />
+              <Do
+                s={s}
+                act={act}
+                action={{
+                  type: 'supplyRequest',
+                  requestId: r.id,
+                  quantity: Number(counts[r.id] ?? '1'),
+                  transport,
+                }}
+              >
+                交付现货
+              </Do>
+              <Do
+                s={s}
+                act={act}
+                action={{ type: 'reserveRequest', requestId: r.id }}
+              >
+                预留至次日中午 · 关系6
+              </Do>
+            </div>
+          ))}
+          {offers.forecasts.map((f) => (
+            <p key={f.customer}>
+              {HOME_CUSTOMERS[f.customer].name}提前告知：第
+              {Math.floor(f.opensAt / 1440) + 1}日08—20时将收
+              {GOODS[f.good].name}，报价待公布。
+            </p>
+          ))}
+        </div>
+        <aside className="detail">
+          <h2>整批货盘</h2>
+          {offers.lots.map((lot) => (
+            <div key={lot.id}>
+              <strong>
+                {lot.large
+                  ? '熟客大宗'
+                  : lot.opensAt % 1440 === 1080
+                    ? '夜市尾货'
+                    : '行商货盘'}
+              </strong>
+              <p>
+                {lotDescription(lot)} · 总价{lot.price}文
+              </p>
+              <p>
+                {formatClock(lot.closesAt)}收摊；易腐品剩余保鲜
+                {lot.shelfMinutes / 60}小时。
+              </p>
+              <Do
+                s={s}
+                act={act}
+                action={{ type: 'buyLot', lotId: lot.id, transport }}
+              >
+                整批买下
+              </Do>
+            </div>
+          ))}
+          {!offers.lots.length && (
+            <p>当前没有可购货盘，普通货盘08:00、夜市18:00开放。</p>
+          )}
+          <Do
+            s={s}
+            act={act}
+            action={{
+              type: 'wait',
+              minutes:
+                nextDailyTime(
+                  s.clock.minute,
+                  s.clock.minute % 1440 < 1080 ? 1080 : 480,
+                ) - s.clock.minute,
+            }}
+          >
+            等待下一场货市
+          </Do>
+          <h2>商人生涯</h2>
+          {offers.milestones.map((m) => (
+            <details key={m.id}>
+              <summary>
+                {m.title} · 第{Math.floor(m.at / 1440) + 1}日
+              </summary>
+              <p>纪念物：{m.reward.name}</p>
+              <p>{m.reward.story}</p>
+            </details>
+          ))}
+        </aside>
+      </div>
+    </>
+  );
+}
+function PriceChart({ s, good }: { s: GameState; good: Good }) {
+  const values = s.history.flatMap((h) => [
+    h.prices[good].buy,
+    h.prices[good].sell,
+  ]);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const points = (side: 'buy' | 'sell') =>
+    s.history
+      .map(
+        (h, i) =>
+          `${10 + (i * 280) / Math.max(1, s.history.length - 1)},${90 - ((h.prices[good][side] - low) * 70) / Math.max(1, high - low)}`,
+      )
+      .join(' ');
+  return (
+    <figure>
+      <svg
+        viewBox="0 0 300 105"
+        aria-label={`${GOODS[good].name}最近14日买卖价格，详细数值见下方文字`}
+        style={{ width: '100%', maxHeight: 140 }}
+      >
+        <polyline
+          points={points('buy')}
+          fill="none"
+          stroke="#ae572d"
+          strokeWidth="2"
+        />
+        <polyline
+          points={points('sell')}
+          fill="none"
+          stroke="#39736a"
+          strokeWidth="2"
+        />
+      </svg>
+      <figcaption>
+        买价（棕） / 卖价（绿） · {low}—{high}文
+      </figcaption>
+    </figure>
+  );
+}
 function Market({ s, act }: Props) {
+  const [scope, setScope] = useWorkspaceValue<string>('market.scope', '全部');
+  const [favoriteText, setFavoriteText] = useWorkspaceValue<string>(
+    'market.favorites',
+    '',
+  );
+  const favorites = favoriteText
+    .split(',')
+    .filter((g) => GOOD_IDS.includes(g as Good));
+  const [transport, setTransport] = useState<Transport>('self');
+  const [opportunities, setOpportunities] = useWorkspaceValue<boolean>(
+    'market.opportunities',
+    false,
+  );
   const [category, setCategory] = useWorkspaceValue<string>(
     'market.category',
     '全部',
@@ -177,25 +405,43 @@ function Market({ s, act }: Props) {
     false,
   );
   const list = GOOD_IDS.filter(
-    (g) => category === '全部' || GOODS[g].category === category,
+    (g) =>
+      (category === '全部' || GOODS[g].category === category) &&
+      (scope === '全部' ||
+        (scope === '持仓' ? quantity(s, g) > 0 : favorites.includes(g))),
   );
-  const selected = list.includes(good) ? good : list[0];
+  const selected = list.includes(good) ? good : (list[0] ?? good);
   const g = GOODS[selected];
   const q = Number(count);
   const p = quote(s, selected);
   const owned = quantity(s, selected);
   const cost = inventoryCost(s, selected);
   const earliest = s.batches
-    .filter((b) => b.good === selected && b.expires !== null)
-    .sort((a, b) => a.expires! - b.expires!)[0]?.expires;
+    .filter((b) => b.good === selected && b.remainingMinutes != null)
+    .sort((a, b) => a.remainingMinutes! - b.remainingMinutes!)[0];
+  const saleCost = q > 0 && q <= owned ? inventoryCost(s, selected, q) : 0;
+  const freight =
+    q > 0 ? transportQuote(q * (selected === 'hen' ? 2 : 1), transport).fee : 0;
   const selectGood = (v: Good) => {
     setGood(v);
     setCount('1');
     setHistory(false);
   };
+  if (opportunities)
+    return (
+      <Frame title="货盘与收购" note="货源限量，昼夜各有生意；成交仍需搬运。">
+        <Btn subtle onClick={() => setOpportunities(false)}>
+          返回商品行情
+        </Btn>
+        <MarketOpportunitiesView s={s} act={act} />
+      </Frame>
+    );
   return (
     <Frame title="州桥市" note="看行情免费，选一件货，再决定买卖。">
       <div className="toolbar">
+        <Btn subtle onClick={() => setOpportunities(true)}>
+          货盘、夜市与收购
+        </Btn>
         <label>
           商品分类{' '}
           <select
@@ -212,6 +458,18 @@ function Market({ s, act }: Props) {
             )}
           </select>
         </label>
+        <label>
+          筛选
+          <select
+            aria-label="商品筛选"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+          >
+            {['全部', '持仓', '关注'].map((v) => (
+              <option key={v}>{v}</option>
+            ))}
+          </select>
+        </label>
         <span>累计搬运 {num(s.daily.tradeUnits)} 单位</span>
       </div>
       <div className="split">
@@ -221,6 +479,7 @@ function Market({ s, act }: Props) {
             <span>买 / 卖 · 较昨日</span>
           </div>
           <div className="item-list">
+            {list.length === 0 && <p>没有匹配商品，可切换筛选查看。</p>}
             {list.map((id) => {
               const price = quote(s, id);
               const prev = s.history.at(-2)?.prices[id].buy;
@@ -254,7 +513,7 @@ function Market({ s, act }: Props) {
             })}
           </div>
         </div>
-        <aside className="detail market-detail">
+        <aside className="detail market-detail" hidden={list.length === 0}>
           <div className="detail-head">
             <h2 className="icon-label">
               <GoodIcon good={selected} large />
@@ -264,16 +523,31 @@ function Market({ s, act }: Props) {
               {history ? '交易详情' : '价格记录'}
             </Btn>
           </div>
+          <Btn
+            subtle
+            onClick={() =>
+              setFavoriteText(
+                favorites.includes(selected)
+                  ? favorites.filter((g) => g !== selected).join(',')
+                  : [...favorites, selected].join(','),
+              )
+            }
+          >
+            {favorites.includes(selected) ? '取消关注' : '关注商品'}
+          </Btn>
           {history ? (
-            <TextPages
-              text={s.history
-                .map(
-                  (h) =>
-                    `第${h.day}日：买${h.prices[selected].buy} / 卖${h.prices[selected].sell}文。`,
-                )
-                .join(' ')}
-              size={130}
-            />
+            <>
+              <PriceChart s={s} good={selected} />
+              <TextPages
+                text={s.history
+                  .map(
+                    (h) =>
+                      `第${h.day}日：买${h.prices[selected].buy} / 卖${h.prices[selected].sell}文。`,
+                  )
+                  .join(' ')}
+                size={130}
+              />
+            </>
           ) : (
             <>
               <dl className="facts">
@@ -287,14 +561,67 @@ function Market({ s, act }: Props) {
                 <div>
                   <dt>保质与临期</dt>
                   <dd>
-                    {earliest != null
-                      ? `最早第${earliest}日结束时到期${earliest <= s.day ? ' · 今日临期' : ''}`
+                    {earliest
+                      ? `剩余${Math.max(0, earliest.remainingMinutes! / 60).toFixed(1)}小时 · 该批成本${earliest.cost}文`
                       : g.life
-                        ? `保存${g.life}日`
+                        ? `正常保存${g.life}日`
                         : '无固定到期日'}
                   </dd>
                 </div>
               </dl>
+              <p>
+                可售余量{num(availableSurplus(s, selected))}
+                {g.unit} · 当前持仓估值盈亏
+                {money(Math.floor(owned * p.sell) - cost)}（未实现）
+              </p>
+              {q > 0 && q <= owned && (
+                <p>
+                  本次出库成本{money(saleCost)} · 含运费保本卖价
+                  {Math.ceil((saleCost + freight) / q)}文 · 预计净利
+                  {money(Math.floor(q * p.sell) - saleCost - freight)}
+                </p>
+              )}
+              <details>
+                <summary>相关已知消息与需求</summary>
+                {s.intel
+                  .filter((i) => i.good === selected)
+                  .slice(-3)
+                  .map((i) => (
+                    <p key={i.id}>{i.title ?? i.text}</p>
+                  ))}
+                {publicOpportunities(s)
+                  .requests.filter((r) => r.good === selected)
+                  .map((r) => (
+                    <p key={r.id}>
+                      {HOME_CUSTOMERS[r.customer].name}收{r.remaining}
+                      {g.unit}，每{g.unit}
+                      {r.price}文。
+                    </p>
+                  ))}
+              </details>
+              <label>
+                搬运方式
+                <select
+                  aria-label="搬运方式"
+                  value={transport}
+                  onChange={(e) => setTransport(e.target.value as Transport)}
+                >
+                  <option value="self">自己搬</option>
+                  <option value="cart" disabled={!s.home.cart}>
+                    手推车{s.home.cart ? '' : '（尚未购买）'}
+                  </option>
+                  <option value="porter">雇脚夫 · 08—18时</option>
+                </select>
+              </label>
+              {q > 0 && (
+                <small>
+                  {
+                    transportQuote(q * (selected === 'hen' ? 2 : 1), transport)
+                      .fee
+                  }
+                  文运费，实际耗时与体力见成交按钮。
+                </small>
+              )}
               <label className="quantity">
                 交易数量
                 <input
@@ -315,7 +642,9 @@ function Market({ s, act }: Props) {
                 <Btn
                   subtle
                   onClick={() =>
-                    setCount(String(maximumTrade(s, selected, 'buy')))
+                    setCount(
+                      String(maximumTrade(s, selected, 'buy', transport)),
+                    )
                   }
                 >
                   最大买入
@@ -323,7 +652,9 @@ function Market({ s, act }: Props) {
                 <Btn
                   subtle
                   onClick={() =>
-                    setCount(String(maximumTrade(s, selected, 'sell')))
+                    setCount(
+                      String(maximumTrade(s, selected, 'sell', transport)),
+                    )
                   }
                 >
                   最大卖出
@@ -335,7 +666,7 @@ function Market({ s, act }: Props) {
                       String(
                         Math.min(
                           availableSurplus(s, selected),
-                          maximumTrade(s, selected, 'sell'),
+                          maximumTrade(s, selected, 'sell', transport),
                         ),
                       ),
                     )
@@ -361,6 +692,7 @@ function Market({ s, act }: Props) {
                   act={act}
                   action={{
                     type: 'trade',
+                    transport,
                     good: selected,
                     quantity: q,
                     side: 'buy',
@@ -373,6 +705,7 @@ function Market({ s, act }: Props) {
                   act={act}
                   action={{
                     type: 'trade',
+                    transport,
                     good: selected,
                     quantity: q,
                     side: 'sell',
@@ -418,7 +751,7 @@ function Production({ s, act }: Props) {
         : queue.map((j) => ({
             id: String(j.id),
             name: RECIPES.find((r) => r.id === j.recipeId)!.name,
-            detail: `${s.equipment.find((e) => e.id === j.equipmentId)?.installed ? '第' + j.readyDay + '日完成' : '封存暂停'}`,
+            detail: productionCompletionLabel(s, j),
           }));
   const id = items.some((x) => x.id === selected) ? selected : items[0]?.id;
   const r = RECIPES.find((r) => r.id === id);
@@ -533,7 +866,7 @@ function Production({ s, act }: Props) {
                   </p>
                   <p>
                     {r.duration
-                      ? '占用设备' + r.duration + '夜'
+                      ? '占用设备' + r.duration * 24 + '小时'
                       : '当日完成，设备可继续使用'}
                     ；保质期{r.shelfLife ? r.shelfLife + '日' : '无限制'}。
                   </p>
@@ -542,7 +875,7 @@ function Production({ s, act }: Props) {
                 <>
                   <small>
                     {EQUIPMENT[r.equipment].name} · {SKILL_LEVELS[r.minSkill]} ·{' '}
-                    {r.duration ? r.duration + '夜' : '当日完成'} · 保质
+                    {r.duration ? r.duration * 24 + '小时' : '当日完成'} · 保质
                     {r.shelfLife ? r.shelfLife + '日' : '无限制'}
                   </small>
                   <label className="quantity">
@@ -690,8 +1023,8 @@ function Production({ s, act }: Props) {
             <>
               <h2>{RECIPES.find((r) => r.id === job.recipeId)!.name}</h2>
               <p>
-                第{job.startDay}日开工，{job.quantity}批。预计第{job.readyDay}
-                日完成，封存期间顺延。
+                第{job.startDay}日开工，{job.quantity}批。
+                {productionCompletionLabel(s, job)}，停用期间顺延。
               </p>
               <p>
                 已投入{money(job.inputCost)}，预留{job.outputUnits / 10}份仓储。
@@ -712,97 +1045,212 @@ function Production({ s, act }: Props) {
   );
 }
 function Housing({ s, act }: Props) {
+  const [view, setView] = useWorkspaceValue<string>('housing.view', '生活');
   const [id, setId] = useWorkspaceValue('housing.id', s.housing.id);
   const h = HOUSING[id];
   return (
     <Frame
       title="安居与经营"
-      note={`当前${HOUSING[s.housing.id].name} · 设备${s.equipment.filter((e) => e.installed).length}/${HOUSING[s.housing.id].slots} · 养鸡${s.hens.length}/${henCapacity(s)}`}
+      note={`当前${HOUSING[s.housing.id].name} · 功能位${usedHomeSlots(s)}/${HOUSING[s.housing.id].slots} · 养鸡${s.hens.length}/${henCapacity(s)}`}
     >
-      <div className="split">
-        <div className="list-column">
-          <div className="item-list">
-            {HOUSING_IDS.map((x) => (
-              <button
-                key={x}
-                className={`list-item ${id === x ? 'selected' : ''}`}
-                onClick={() => setId(x)}
-              >
-                <strong className="icon-label">
-                  <GameIcon kind={x} />
-                  {HOUSING[x].name}
-                </strong>
-                <small>
-                  {x === s.housing.id
-                    ? '当前住所'
-                    : HOUSING[x].kind === 'owned'
-                      ? `购买${money(HOUSING[x].cost)}`
-                      : HOUSING[x].kind === 'rent'
-                        ? `接手${money(HOUSING[x].cost)}`
-                        : '免费临时落脚'}
-                </small>
-              </button>
+      <div className="toolbar">
+        {['生活', '房屋', '设施'].map((v) => (
+          <Btn key={v} subtle={view !== v} onClick={() => setView(v)}>
+            {v}
+          </Btn>
+        ))}
+      </div>
+      <div className="housing-body" hidden={view !== '生活'}>
+        <LifeControls s={s} act={act} />
+        {s.life.wakeSummary && (
+          <details className="wake-summary" key={s.life.wakeSummary.at}>
+            <summary>
+              睡醒摘要 · 第{Math.floor(s.life.wakeSummary.at / 1440) + 1}日
+              {formatClock(s.life.wakeSummary.at)}
+            </summary>
+            {s.life.wakeSummary.lines.map((line, i) => (
+              <p key={i}>{line}</p>
             ))}
+          </details>
+        )}
+      </div>
+      <div className="housing-body" hidden={view !== '设施'}>
+        <details open>
+          <summary>
+            住宅设施 · 已用{usedHomeSlots(s)}/{HOUSING[s.housing.id].slots}
+            功能位
+          </summary>
+          {!s.home.cart && (
+            <Do s={s} act={act} action={{ type: 'buyCart' }}>
+              购买手推车 · 300文
+            </Do>
+          )}
+          {(Object.keys(FACILITIES) as FacilityKind[]).map((kind) => {
+            const spec = FACILITIES[kind];
+            const owned = s.home.facilities.find((f) => f.kind === kind);
+            return (
+              <div key={kind}>
+                <strong>{spec.name}</strong>
+                <p>{spec.detail}</p>
+                <div className="actions">
+                  <Do
+                    s={s}
+                    act={act}
+                    action={{
+                      type: owned?.installed
+                        ? 'removeFacility'
+                        : 'installFacility',
+                      facility: kind,
+                    }}
+                  >
+                    {owned?.installed
+                      ? '封存'
+                      : owned
+                        ? '重新安装'
+                        : `购置并安装 ${spec.cost}文`}
+                  </Do>
+                  {owned && (
+                    <Do
+                      s={s}
+                      act={act}
+                      action={{ type: 'sellFacility', facility: kind }}
+                    >
+                      出售 · {Math.floor(spec.cost * 0.6)}文
+                    </Do>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <p>
+            凉储间优先保护：
+            {s.home.coldPriority.map((g) => GOODS[g].name).join('、')}
+            ；同品类临期优先。
+          </p>
+          <details>
+            <summary>邀请熟客与居家故事</summary>
+            {HOME_CUSTOMER_IDS.filter(
+              (id) => s.commerce.customers[id]?.met,
+            ).map((id) => (
+              <div key={id}>
+                <Do s={s} act={act} action={{ type: 'host', customer: id }}>
+                  邀请{HOME_CUSTOMERS[id].name} · 20文
+                </Do>
+                {HOME_STORIES[id]
+                  .slice(0, s.home.visits[id]?.count ?? 0)
+                  .map((story) => (
+                    <p key={story}>{story}</p>
+                  ))}
+              </div>
+            ))}
+          </details>
+          <select
+            aria-label="优先保鲜商品"
+            value={s.home.coldPriority[0] ?? 'bread'}
+            onChange={(e) =>
+              act({
+                type: 'coldPriority',
+                goods: [
+                  e.target.value as Good,
+                  ...s.home.coldPriority.filter((g) => g !== e.target.value),
+                ],
+              })
+            }
+          >
+            {GOOD_IDS.filter((g) => GOODS[g].life).map((g) => (
+              <option key={g} value={g}>
+                {GOODS[g].name}
+              </option>
+            ))}
+          </select>
+        </details>
+      </div>
+      <div className="housing-body" hidden={view !== '房屋'}>
+        <div className="split">
+          <div className="list-column">
+            <div className="item-list">
+              {HOUSING_IDS.map((x) => (
+                <button
+                  key={x}
+                  className={`list-item ${id === x ? 'selected' : ''}`}
+                  onClick={() => setId(x)}
+                >
+                  <strong className="icon-label">
+                    <GameIcon kind={x} />
+                    {HOUSING[x].name}
+                  </strong>
+                  <small>
+                    {x === s.housing.id
+                      ? '当前住所'
+                      : HOUSING[x].kind === 'owned'
+                        ? `购买${money(HOUSING[x].cost)}`
+                        : HOUSING[x].kind === 'rent'
+                          ? `接手${money(HOUSING[x].cost)}`
+                          : '免费临时落脚'}
+                  </small>
+                </button>
+              ))}
+            </div>
           </div>
+          <aside className="detail">
+            <h2 className="icon-label">
+              <GameIcon kind={id} large />
+              {h.name}
+            </h2>
+            <p>{h.detail}</p>
+            <dl className="facts">
+              <div>
+                <dt>仓储 / 设备位</dt>
+                <dd>
+                  {h.capacity / 10}份 / {h.slots}台
+                </dd>
+              </div>
+              <div>
+                <dt>每日费用 / 8小时睡眠恢复</dt>
+                <dd>
+                  {money(h.upkeep)} / {h.recovery}体力
+                </dd>
+              </div>
+              <div>
+                <dt>养鸡上限（需鸡舍）</dt>
+                <dd>{h.henCapacity}只</dd>
+              </div>
+            </dl>
+            <div className="actions">
+              {id !== s.housing.id && id !== 'street' && (
+                <Do
+                  s={s}
+                  act={act}
+                  action={{
+                    type: h.kind === 'owned' ? 'buyHousing' : 'rentHousing',
+                    housing: id,
+                  }}
+                >
+                  {h.kind === 'owned' ? '买下' : '租下'}
+                </Do>
+              )}
+              {HOUSING[s.housing.id].kind === 'rent' && (
+                <Do s={s} act={act} action={{ type: 'endLease' }}>
+                  退租并封存设备
+                </Do>
+              )}
+              {HOUSING[s.housing.id].kind === 'owned' && (
+                <Do s={s} act={act} action={{ type: 'sellHousing' }}>
+                  出售产权 ·{' '}
+                  {money(Math.floor(HOUSING[s.housing.id].cost * 0.72))}
+                </Do>
+              )}
+              {s.housing.maintenanceSuspended && (
+                <Do s={s} act={act} action={{ type: 'maintain' }}>
+                  补缴维护费
+                </Do>
+              )}
+            </div>
+            <small>
+              搬家不销毁资产。退租后在制品暂停，超额库存可继续卖出；迁入新住所前需满足容量限制。
+            </small>
+          </aside>
         </div>
-        <aside className="detail">
-          <h2 className="icon-label">
-            <GameIcon kind={id} large />
-            {h.name}
-          </h2>
-          <p>{h.detail}</p>
-          <dl className="facts">
-            <div>
-              <dt>仓储 / 设备位</dt>
-              <dd>
-                {h.capacity / 10}份 / {h.slots}台
-              </dd>
-            </div>
-            <div>
-              <dt>夜间费用 / 恢复</dt>
-              <dd>
-                {money(h.upkeep)} / {h.recovery}体力
-              </dd>
-            </div>
-            <div>
-              <dt>养鸡上限（需鸡舍）</dt>
-              <dd>{h.henCapacity}只</dd>
-            </div>
-          </dl>
-          <div className="actions">
-            {id !== s.housing.id && id !== 'street' && (
-              <Do
-                s={s}
-                act={act}
-                action={{
-                  type: h.kind === 'owned' ? 'buyHousing' : 'rentHousing',
-                  housing: id,
-                }}
-              >
-                {h.kind === 'owned' ? '买下' : '租下'}
-              </Do>
-            )}
-            {HOUSING[s.housing.id].kind === 'rent' && (
-              <Do s={s} act={act} action={{ type: 'endLease' }}>
-                退租并封存设备
-              </Do>
-            )}
-            {HOUSING[s.housing.id].kind === 'owned' && (
-              <Do s={s} act={act} action={{ type: 'sellHousing' }}>
-                出售产权 ·{' '}
-                {money(Math.floor(HOUSING[s.housing.id].cost * 0.72))}
-              </Do>
-            )}
-            {s.housing.maintenanceSuspended && (
-              <Do s={s} act={act} action={{ type: 'maintain' }}>
-                补缴维护费
-              </Do>
-            )}
-          </div>
-          <small>
-            搬家不销毁资产。退租后在制品暂停，超额库存可继续卖出；迁入新住所前需满足容量限制。
-          </small>
-        </aside>
       </div>
     </Frame>
   );
@@ -814,7 +1262,7 @@ function People({ s, act }: Props) {
   return (
     <Frame
       title="人物与手艺"
-      note="每日劳动两次；休息、加餐、治疗、上课各一次。"
+      note="劳动和休息消耗时间；每周期有效加餐两次，治疗和学习各一次。"
     >
       <div className="split">
         <div className="list-column">
@@ -825,7 +1273,7 @@ function People({ s, act }: Props) {
             >
               <strong>饮食、休养与劳动</strong>
               <small>
-                健康{s.health} · 体力{s.stamina}
+                健康{num(s.health)} · 体力{num(s.stamina)}
               </small>
             </button>
             {SKILL_IDS.map((k) => (
@@ -881,14 +1329,18 @@ function People({ s, act }: Props) {
                 </Btn>
               </div>
               <div className="care-grid">
-                <Do s={s} act={act} action={{ type: 'short' }}>
-                  短工 · 25文
-                </Do>
-                <Do s={s} act={act} action={{ type: 'heavy' }}>
-                  重活 · 40文
-                </Do>
                 <Do s={s} act={act} action={{ type: 'rest' }}>
-                  休息 · 恢复25体力
+                  休息1小时 · 恢复20体力
+                </Do>
+                <Do
+                  s={s}
+                  act={act}
+                  action={{
+                    type: 'eat',
+                    meal: quantity(s, 'bread') ? 'bread' : 'diner',
+                  }}
+                >
+                  用主餐 · 30分钟
                 </Do>
                 <Do s={s} act={act} action={{ type: 'snack' }}>
                   加餐 · 6文 / +15体力
@@ -1045,7 +1497,7 @@ function Assets({ s }: Props) {
             .map((j) => ({
               id: String(j.id),
               name: RECIPES.find((r) => r.id === j.recipeId)!.name,
-              summary: `${j.quantity}批 · 第${j.readyDay}日预计完成`,
+              summary: `${j.quantity}批 · ${productionCompletionLabel(s, j)}`,
               value: j.inputCost,
             }))
         : category === '设备'
@@ -1055,16 +1507,35 @@ function Assets({ s }: Props) {
               summary: e.jobId ? '生产中' : e.installed ? '已安装' : '封存中',
               value: Math.floor(EQUIPMENT[e.kind].cost * 0.6),
             }))
-          : HOUSING[s.housing.id].kind === 'owned'
+          : category === '设施'
             ? [
-                {
-                  id: s.housing.id,
-                  name: HOUSING[s.housing.id].name,
-                  summary: '自有产权',
-                  value: Math.floor(HOUSING[s.housing.id].cost * 0.72),
-                },
+                ...s.home.facilities.map((f) => ({
+                  id: f.kind,
+                  name: FACILITIES[f.kind].name,
+                  summary: f.installed ? '已安装' : '封存中',
+                  value: Math.floor(FACILITIES[f.kind].cost * 0.6),
+                })),
+                ...(s.home.cart
+                  ? [
+                      {
+                        id: 'cart',
+                        name: '手推车',
+                        summary: '搬运工具 · 当前不可出售',
+                        value: 0,
+                      },
+                    ]
+                  : []),
               ]
-            : [];
+            : HOUSING[s.housing.id].kind === 'owned'
+              ? [
+                  {
+                    id: s.housing.id,
+                    name: HOUSING[s.housing.id].name,
+                    summary: '自有产权',
+                    value: Math.floor(HOUSING[s.housing.id].cost * 0.72),
+                  },
+                ]
+              : [];
   const chosen = rows.find((r) => r.id === selected) ?? rows[0];
   const good = category === '货物' && chosen ? (chosen.id as Good) : null;
   const eq =
@@ -1081,7 +1552,10 @@ function Assets({ s }: Props) {
   );
   const equipmentValue = s.equipment.reduce(
     (v, e) => v + Math.floor(EQUIPMENT[e.kind].cost * 0.6),
-    0,
+    s.home.facilities.reduce(
+      (n, f) => n + Math.floor(FACILITIES[f.kind].cost * 0.6),
+      0,
+    ),
   );
   const propertyValue =
     HOUSING[s.housing.id].kind === 'owned'
@@ -1090,10 +1564,10 @@ function Assets({ s }: Props) {
   return (
     <Frame
       title="我的资产"
-      note={`现金 ${money(s.cash)} · 冻结保证金 ${money(s.commerce.orders.filter((o) => o.status === 'accepted').reduce((n, o) => n + o.deposit, 0))} · 货物估值 ${money(goodsValue)} · 设备/房产回收价 ${money(equipmentValue + propertyValue)}`}
+      note={`现金 ${money(s.cash)} · 冻结保证金 ${money(s.commerce.orders.filter((o) => o.status === 'accepted').reduce((n, o) => n + o.deposit, 0))} · 货物估值 ${money(goodsValue)} · 设备/设施/房产回收价 ${money(equipmentValue + propertyValue)}`}
     >
       <div className="toolbar">
-        {['货物', '在制品', '设备', '房产'].map((c) => (
+        {['货物', '在制品', '设备', '设施', '房产'].map((c) => (
           <Btn
             key={c}
             subtle={category !== c}
@@ -1178,7 +1652,7 @@ function Assets({ s }: Props) {
                         .filter((b) => b.good === good)
                         .map(
                           (b) =>
-                            `${num(b.units / 10)}${GOODS[good].unit}，成本${money(b.cost)}，${b.origin === 'buy' ? '购入' : b.origin === 'production' ? '自产' : '获赠'}；${b.expires === null ? '无固定到期日' : `第${b.expires}日结束时到期${b.expires <= s.day ? '（临期）' : ''}`}。`,
+                            `${num(b.units / 10)}${GOODS[good].unit}，成本${money(b.cost)}，${b.origin === 'buy' ? '购入' : b.origin === 'production' ? '自产' : '获赠'}；${b.remainingMinutes == null ? '无固定保鲜期限' : `剩余保鲜${num(b.remainingMinutes / 60)}小时${b.remainingMinutes <= 1440 ? '（临期）' : ''}，凉储保护期间流逝减半`}。`,
                         )
                         .join('\n')
                 }
@@ -1248,7 +1722,8 @@ function StatusEffects({ s }: { s: GameState }) {
                 role="tooltip"
                 id={`status-help-${k}`}
               >
-                {BUFFS[k].detail}
+                {BUFFS[k].detail}；第{Math.floor(s.buffs[k]! / 1440) + 1}日
+                {formatClock(s.buffs[k]!)}到期
               </TooltipContent>
             </Tooltip>
           ))}
@@ -1297,6 +1772,7 @@ function Ledger({ s }: Props) {
             ['学费', l.tuition],
             ['设备 / 回收', `${money(l.equipment)} / ${money(l.returns)}`],
             ['住宅 / 生活', `${money(l.housing)} / ${money(l.living)}`],
+            ['交际开支', money(l.social)],
             ['饲料 / 医疗', `${money(l.feed)} / ${money(l.medical)}`],
             ['损耗', l.losses],
             [
@@ -1337,213 +1813,295 @@ function Ledger({ s }: Props) {
     </Frame>
   );
 }
-function Night({ s, act }: Props) {
-  const [risksOpen, setRisksOpen] = useState(false);
-  const risks = [
-    ...s.commerce.orders
-      .filter((o) => o.status === 'accepted' && o.deadline <= s.day)
-      .map(
-        (o) =>
-          `订单「${o.title}」今夜将违约：没收保证金${o.deposit}文，客户关系−${o.highRisk ? 2 : 1}。`,
-      ),
-    ...GOOD_IDS.filter((g) =>
-      s.batches.some(
-        (b) => b.good === g && b.expires !== null && b.expires <= s.day,
-      ),
-    ).map((g) => `${GOODS[g].name}有临期批次，今夜结束时将丢弃。`),
-  ];
-  const [meal, setMeal] = useState<Meal>(
-    s.nightPreference?.meal ?? (quantity(s, 'bread') >= 1 ? 'bread' : 'diner'),
-  );
-  const [bed, setBed] = useState<Bed>(
-    s.nightPreference?.bed ??
-      (s.housing.id === 'street' ? 'inn' : s.housing.id),
-  );
-  const [feedAll, setFeedAll] = useState(
-    s.nightPreference?.feedMode !== 'fixed',
-  );
-  const [feed, setFeed] = useState(
-    String(
-      s.nightPreference?.feedMode === 'fixed'
-        ? s.nightPreference.feed
-        : s.hens.length,
-    ),
-  );
-  let p;
-  let error = '';
-  try {
-    p = nightPreview(s, {
-      type: 'night',
-      meal,
-      bed,
-      feed: feedAll ? s.hens.length : Number(feed),
-    });
-  } catch (e) {
-    error = (e as Error).message;
-  }
+function CitySchedule({ s }: { s: GameState }) {
   return (
-    <Frame title="安排今晚" note="晚饭、饲料与住宅费用合并核算，再一次结算。">
-      <div className="split">
-        <div className="night-inputs">
-          <label>
-            晚饭
-            <select
-              aria-label="晚饭"
-              value={meal}
-              onChange={(e) => setMeal(e.target.value as Meal)}
-            >
-              {[
-                ['bread', '炊饼一个'],
-                ['egg', '鸡蛋两枚'],
-                ['saltedEgg', '咸蛋一个'],
-                ['grain', '粟米一份'],
-                ['diner', '食肆 · 18文'],
-                ['none', '不吃 · 健康−8'],
-              ].map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            住宿
-            <select
-              aria-label="住宿"
-              value={bed}
-              onChange={(e) => setBed(e.target.value as Bed)}
-            >
-              {!['inn', 'temple', 'street', s.housing.id].includes(bed) && (
-                <option value={bed} disabled>
-                  {HOUSING[bed as keyof typeof HOUSING]?.name ?? bed}
-                  （已不可用，请重选）
-                </option>
-              )}
-              {[
-                ['inn', '客栈 · 30文'],
-                ['temple', '庙廊 · 免费 / 有失窃风险'],
-                ['street', '街头 · 免费 / 健康−3'],
-                ...(s.housing.id !== 'street'
-                  ? [[s.housing.id, HOUSING[s.housing.id].name]]
-                  : []),
-              ].map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            喂鸡数量
-            <input
-              aria-label="喂鸡数量"
-              type="number"
-              min="0"
-              max={s.hens.length}
-              value={feedAll ? s.hens.length : feed}
-              onChange={(e) => {
-                setFeed(e.target.value);
-                setFeedAll(false);
-              }}
-            />
-          </label>
-          <label className="feed-all">
-            <input
-              type="checkbox"
-              checked={feedAll}
-              onChange={(e) => setFeedAll(e.target.checked)}
-            />
-            每天喂全部母鸡
-          </label>
-          <small>
-            当前{s.hens.length}
-            只母鸡。未喂满三夜会饿死；另住客栈仍需支付现有住宅费用。
-          </small>
+    <details className="city-schedule" open>
+      <summary>接下来的一天 · 时辰表</summary>
+      <p>
+        市场／招工／学艺 08:00—18:00 · 熟客 08:00—20:00 · 茶馆 09:00—21:00 ·
+        夜市 18:00—24:00 · 食肆 06:00—24:00。办事需在打烊前完成；住所随时可回。
+      </p>
+      {citySchedule(s.clock.minute).map((item) => (
+        <p key={item.at}>
+          <strong>{relativeMoment(item.at, s.clock.minute)}</strong> ·{' '}
+          {item.text}
+        </p>
+      ))}
+    </details>
+  );
+}
+
+function Street({ s, act }: Props) {
+  const navigate = useContext(NavigationContext);
+  const [plans, setPlans] = useWorkspaceValue<string>(
+    `street.plans.${s.seed}.${s.day}`,
+    '',
+  );
+  const selected = plans.split('|').filter(Boolean);
+  const goHome = () => {
+    setWorkspacePreference('housing.view', '生活');
+    navigate('housing');
+  };
+  const short = actionPreview(s, { type: 'short' });
+  const next = citySchedule(s.clock.minute)[0];
+  const waitForNight = s.clock.minute % 1440 < 1080;
+  const waitAt = nextDailyTime(s.clock.minute, waitForNight ? 1080 : 480);
+  const offers = publicOpportunities(s);
+  const deliverable = offers.requests.find(
+    (r) =>
+      availableSurplus(s, r.good) >= 1 &&
+      !actionPreview(s, { type: 'supplyRequest', requestId: r.id, quantity: 1 })
+        .error,
+  );
+  const hungry = s.hens.filter((h) => !s.life.fed.includes(h.id)).length;
+  return (
+    <Frame
+      title="此刻的汴梁"
+      note={`第${s.day}日 ${formatClock(s.clock.minute)} · 下一件城中变化：${relativeMoment(next.at, s.clock.minute)}，${next.text}。`}
+    >
+      <div className="split street-body">
+        <div className="list-column">
+          <section className="detail">
+            <h2>招工告示</h2>
+            <p>
+              每天08:00—18:00，须在18:00前收工。短工最迟16:00开工，重活最迟14:00开工。
+            </p>
+            <div className="care-grid">
+              <Do s={s} act={act} action={{ type: 'short' }}>
+                短工 · 25文
+              </Do>
+              <Do s={s} act={act} action={{ type: 'heavy' }}>
+                重活 · 40文
+              </Do>
+            </div>
+            <p>体力不足时可回家休息；短暂休息不能替代睡眠。</p>
+          </section>
+          <section className="detail">
+            <h2>眼下可以做什么</h2>
+            {s.day === 1 && (
+              <p>
+                刚安顿下来，不必一直等到晚上。白天可找活计、看收货告示，也可以先备好饭食和鸡粮。逛页面不耗时间，办事才会推进时辰。
+              </p>
+            )}
+            <p>
+              {short.error
+                ? '招工暂不可做，原因见招工告示。'
+                : `做一趟短工可得25文，${relativeMoment(short.finishAt, s.clock.minute)}收工。`}
+            </p>
+            {deliverable ? (
+              <>
+                <p>
+                  有人正在收你手里的{GOODS[deliverable.good].name}
+                  ，可先交一份现货。收益需结合进货成本判断。
+                </p>
+                <Do
+                  s={s}
+                  act={act}
+                  action={{
+                    type: 'supplyRequest',
+                    requestId: deliverable.id,
+                    quantity: 1,
+                  }}
+                >
+                  交付1{GOODS[deliverable.good].unit}
+                  {GOODS[deliverable.good].name}
+                </Do>
+              </>
+            ) : (
+              <>
+                <p>
+                  看看今日收货价和进货成本，再决定要不要做一趟生意；目前没有可直接交付的闲置现货。
+                </p>
+                <Btn
+                  onClick={() => {
+                    setWorkspacePreference('market.opportunities', true);
+                    navigate('market');
+                  }}
+                >
+                  查看收货与货盘
+                </Btn>
+              </>
+            )}
+            <p>
+              {s.hens.length
+                ? `家中${s.hens.length}只母鸡，${hungry}只还没喂。${relativeMoment(nextDailyTime(s.clock.minute, 360), s.clock.minute)}才会检查产蛋，先备好粟米。`
+                : '先安排饭食与住处，留好生活开支。'}
+              {s.life.ateCycle === lifeCycle(s.clock.minute)
+                ? '已经吃过主餐。'
+                : `记得在${relativeMoment(nextDailyTime(s.clock.minute, 360), s.clock.minute)}前吃主餐。`}
+            </p>
+            <Btn onClick={goHome}>回家安排饭食与鸡群</Btn>
+          </section>
+          <section className="detail">
+            <h2>今日打算</h2>
+            <p>
+              最多记三件事，办妥后取消勾选。只作备忘，不会自动办事；新的一日另起一页。
+            </p>
+            {[
+              '做一趟短工',
+              '看收货告示',
+              '备好饭食与鸡粮',
+              '逛夜市',
+              '早些睡觉',
+            ].map((name) => (
+              <label className="plan-item" key={name}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(name)}
+                  disabled={!selected.includes(name) && selected.length >= 3}
+                  onChange={(e) =>
+                    setPlans(
+                      (e.target.checked
+                        ? [...selected, name]
+                        : selected.filter((v) => v !== name)
+                      ).join('|'),
+                    )
+                  }
+                />
+                {name}
+              </label>
+            ))}
+          </section>
         </div>
         <aside className="detail">
-          <div className="detail-head">
-            <h2>今晚的账</h2>
-            {risks.length > 0 && (
-              <Btn subtle onClick={() => setRisksOpen(true)}>
-                到期提醒 ({risks.length})
-              </Btn>
-            )}
-          </div>
-          {p ? (
-            <>
-              <dl className="facts">
-                <div>
-                  <dt>晚饭 / 临时住宿</dt>
-                  <dd>
-                    {money(p.mealCost)} / {money(p.innCost)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>租金或维护费</dt>
-                  <dd>{money(p.housingCost)}</dd>
-                </div>
-                <div>
-                  <dt>现金合计 / 粟米共用</dt>
-                  <dd>
-                    {money(p.cash)} / {p.grain}份
-                  </dd>
-                </div>
-                <div>
-                  <dt>健康变化 / 次日体力</dt>
-                  <dd>
-                    {p.healthChange >= 0 ? '+' : ''}
-                    {p.healthChange} / {p.recovery}
-                  </dd>
-                </div>
-              </dl>
-              <p>
-                {p.food} · {p.unfed.length}只鸡未喂
-              </p>
-              {(p.evict || p.maintenanceSkipped) && (
-                <p className="reason">
-                  {p.evict
-                    ? '无法付租：将退回街头，设备封存。'
-                    : '无法维护：恢复加成与生产暂停。'}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="reason">{error}</p>
-          )}
+          <CitySchedule s={s} />
+          <h2>有想等的时辰</h2>
+          <p>等候会推进保鲜、房费和疲劳；有临近交期时，先处理手头的事。</p>
           <Do
             s={s}
             act={act}
             action={{
-              type: 'night',
-              meal,
-              bed,
-              feed: feedAll ? s.hens.length : Number(feed),
-              feedAll,
+              type: 'wait',
+              minutes: waitAt - s.clock.minute,
             }}
           >
-            安排妥当，度过这一夜 →
+            等到
+            {relativeMoment(waitAt, s.clock.minute)}
+            {waitForNight ? '夜市开张' : '早市开门'}
           </Do>
-          <Do s={s} act={act} action={{ type: 'returnDay' }}>
-            返回白天处理
-          </Do>
+          <Btn onClick={goHome}>回住所歇息</Btn>
         </aside>
       </div>
-      <Dialog open={risksOpen} onOpenChange={setRisksOpen}>
-        <DialogContent className="confirm">
-          <DialogTitle>今晚到期提醒</DialogTitle>
-          <DialogDescription>先查看损失，再决定是否过夜。</DialogDescription>
-          <TextPages text={risks.join(' ')} size={160} />
-          <Btn
-            onClick={() => {
-              setRisksOpen(false);
-              act({ type: 'returnDay' });
+    </Frame>
+  );
+}
+
+function LifeControls({ s, act }: Props) {
+  const [meal, setMeal] = useState<Exclude<Meal, 'none'>>('diner');
+  const [bed, setBed] = useState<Bed>(
+    s.housing.id === 'street' ? 'inn' : s.housing.id,
+  );
+  const [hours, setHours] = useState('8');
+  const hungry = s.hens.filter((h) => !s.life.fed.includes(h.id)).length;
+  return (
+    <div className="detail">
+      <h2>生活与睡眠</h2>
+      <p>
+        {s.life.ateCycle === lifeCycle(s.clock.minute)
+          ? '已经吃过主餐，安心安排接下来的事'
+          : `请在${relativeMoment(nextDailyTime(s.clock.minute, 360), s.clock.minute)}前吃主餐`}{' '}
+        · 睡眠不足{s.clock.sleepDebt.toFixed(1)}小时
+      </p>
+      <section className="life-section">
+        <h3>饭食</h3>
+        <div className="actions">
+          <select
+            aria-label="主餐"
+            value={meal}
+            onChange={(e) => setMeal(e.target.value as Exclude<Meal, 'none'>)}
+          >
+            <option value="diner">食肆18文</option>
+            <option value="bread">炊饼一个</option>
+            <option value="egg">鸡蛋两枚</option>
+            <option value="saltedEgg">咸蛋一个</option>
+            <option value="grain">粟米一份</option>
+          </select>
+          <Do s={s} act={act} action={{ type: 'eat', meal }}>
+            用主餐 · 30分钟
+          </Do>
+        </div>
+      </section>
+      <section className="life-section">
+        <h3>鸡群 · {s.hens.length}只母鸡</h3>
+        <p>
+          还需喂养{hungry}只。下一次产蛋检查：
+          {relativeMoment(nextDailyTime(s.clock.minute, 360), s.clock.minute)}。
+        </p>
+        <div className="actions">
+          {hungry > 0 && (
+            <Do s={s} act={act} action={{ type: 'feed', count: hungry }}>
+              喂养未喂的{hungry}只母鸡
+            </Do>
+          )}
+          <label className="auto-feed-setting">
+            <input
+              type="checkbox"
+              checked={s.life.autoFeed}
+              onChange={(e) =>
+                act({ type: 'autoFeed', enabled: e.target.checked })
+              }
+            />
+            每天清晨05:30，用存粮自动喂鸡
+          </label>
+        </div>
+        <p>
+          {s.life.autoFeed ? '下次自动喂鸡：' : '尚未开启，开启后下次喂鸡：'}
+          {relativeMoment(nextDailyTime(s.clock.minute, 330), s.clock.minute)}
+          。只使用已有粟米，缺粮不会自动购买。
+        </p>
+      </section>
+      <section className="life-section">
+        <h3>歇息</h3>
+        <Do s={s} act={act} action={{ type: 'rest' }}>
+          休息1小时 · 恢复20体力
+        </Do>
+        <div className="actions">
+          <select
+            aria-label="住宿"
+            value={bed}
+            onChange={(e) => setBed(e.target.value as Bed)}
+          >
+            <option value="inn">客栈30文</option>
+            <option value="temple">庙廊</option>
+            <option value="street">街头</option>
+            {s.housing.id !== 'street' && (
+              <option value={s.housing.id}>{HOUSING[s.housing.id].name}</option>
+            )}
+          </select>
+          <input
+            aria-label="睡眠小时"
+            type="number"
+            min="1"
+            max="10"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+          />
+          <Do
+            s={s}
+            act={act}
+            action={{ type: 'sleep', minutes: Number(hours) * 60, bed }}
+          >
+            入睡 · 醒于
+            {relativeMoment(
+              s.clock.minute + Number(hours) * 60,
+              s.clock.minute,
+            )}
+          </Do>
+          <Do
+            s={s}
+            act={act}
+            action={{
+              type: 'sleep',
+              minutes: nextDailyTime(s.clock.minute, 420) - s.clock.minute,
+              bed,
             }}
           >
-            返回白天处理
-          </Btn>
-        </DialogContent>
-      </Dialog>
-    </Frame>
+            睡到
+            {relativeMoment(nextDailyTime(s.clock.minute, 420), s.clock.minute)}
+          </Do>
+        </div>
+      </section>
+    </div>
   );
 }
 function Encounter({ s, act }: Props) {
@@ -1618,7 +2176,7 @@ export default function Home() {
       const backupKey = `${SAVE}-before-ux-revision-2`;
       if (
         previous &&
-        JSON.parse(previous).saveRevision !== 2 &&
+        JSON.parse(previous).saveRevision !== 3 &&
         !localStorage.getItem(backupKey)
       ) {
         localStorage.setItem(backupKey, previous);
@@ -1754,6 +2312,7 @@ export default function Home() {
   const tasks = s ? todayTasks(s) : [];
   const navigate = (target: Tab, good?: Good) => {
     if (good) {
+      setWorkspacePreference('market.opportunities', false);
       setWorkspacePreference('market.category', GOODS[good].category);
       setWorkspacePreference('market.good', good);
       setWorkspacePreference('market.history', false);
@@ -1763,8 +2322,12 @@ export default function Home() {
   };
   const openTask = (task: TodayTask) => {
     if (!s || s.event || s.phase === 'ended') return;
-    if (s.phase === 'night') execute({ type: 'returnDay' });
     if (task.preference) setWorkspacePreference(...task.preference);
+    if (task.target === 'housing')
+      setWorkspacePreference(
+        'housing.view',
+        task.id === 'maintenance' ? '房屋' : '生活',
+      );
     if (task.id.startsWith('order:'))
       setWorkspacePreference('orders.mode', '进行中');
     if (task.id.startsWith('customer:'))
@@ -1778,6 +2341,7 @@ export default function Home() {
     <FeedbackContext.Provider value={currentResult}>
       <NavigationContext.Provider value={navigate}>
         <main
+          data-period={s ? dayPeriod(s.clock.minute) : 'day'}
           className={`game ${s ? 'playing' : 'welcome'} ${reduceMotion ? 'reduce-motion' : ''}`}
         >
           <header className="masthead">
@@ -1860,17 +2424,41 @@ export default function Home() {
             </section>
           ) : (
             <>
+              <div className="city-clock-note">
+                <span>
+                  {
+                    {
+                      dawn: '晨光照进街巷，商贩正准备开市。',
+                      day: '街市正忙，留意今日的收货与交期。',
+                      dusk: '灯笼渐亮，夜市开始迎客。',
+                      evening: '夜市灯火未歇，也该安排吃饭与休息。',
+                      late: '街巷渐静，熬夜的代价正在增加。',
+                    }[dayPeriod(s.clock.minute)]
+                  }
+                </span>
+                <button
+                  className="text-button"
+                  onClick={() => setTodayOpen(true)}
+                >
+                  时辰表与今日要事
+                </button>
+                <button
+                  className="text-button"
+                  disabled={!!s.event || s.phase === 'ended'}
+                  onClick={() => navigate('street')}
+                >
+                  此刻能做什么 · 招工告示
+                </button>
+              </div>
               <section className="status">
                 <div>
                   <span>
                     <StatusIcon kind="date" /> 第{s.day}日 · {s.weather}
                   </span>
                   <strong>
-                    {s.phase === 'night'
-                      ? '夜间安排'
-                      : s.phase === 'ended'
-                        ? '旅程结束'
-                        : '经营日'}
+                    {s.phase === 'ended'
+                      ? '旅程结束'
+                      : `${formatClock(s.clock.minute)} · ${{ dawn: '清晨', day: '日间', dusk: '傍晚', evening: '夜间', late: '深夜' }[dayPeriod(s.clock.minute)]}`}
                   </strong>
                 </div>
                 <div>
@@ -1890,7 +2478,7 @@ export default function Home() {
                   <div className="vital">
                     <span>
                       <StatusIcon kind="health" />
-                      健康 <b>{s.health}/100</b>
+                      健康 <b>{num(s.health)}/100</b>
                       <ResourceDelta
                         value={result?.health ?? 0}
                         revision={result?.id ?? 0}
@@ -1902,7 +2490,7 @@ export default function Home() {
                     <span>
                       <StatusIcon kind="stamina" /> 体力{' '}
                       <b>
-                        {s.stamina}/{staminaMax(s)}
+                        {num(s.stamina)}/{num(staminaMax(s))}
                       </b>
                       <ResourceDelta
                         value={result?.stamina ?? 0}
@@ -1950,11 +2538,7 @@ export default function Home() {
                     {Object.entries(tabs).map(([id, label]) => (
                       <button
                         key={id}
-                        disabled={
-                          !!s.event ||
-                          s.phase === 'night' ||
-                          s.phase === 'ended'
-                        }
+                        disabled={!!s.event || s.phase === 'ended'}
                         aria-current={tab === id ? 'page' : undefined}
                         className={tab === id ? 'active' : ''}
                         onClick={() => {
@@ -1999,10 +2583,10 @@ export default function Home() {
                       </Frame>
                     ) : s.event ? (
                       <Encounter key={s.event.id} s={s} act={act} />
-                    ) : s.phase === 'night' ? (
-                      <Night s={s} act={act} />
                     ) : tab === 'market' ? (
                       <Market s={s} act={act} />
+                    ) : tab === 'street' ? (
+                      <Street key={`${s.seed}:${s.day}`} s={s} act={act} />
                     ) : tab === 'assets' ? (
                       <Assets s={s} act={act} />
                     ) : tab === 'production' ? (
@@ -2032,10 +2616,24 @@ export default function Home() {
                             支付{money(s.target)}归航
                           </Do>
                         )}
-                      {!s.event && ['day', 'market'].includes(s.phase) && (
-                        <Btn onClick={() => act({ type: 'endDay' })}>
-                          收工，安排今晚 →
-                        </Btn>
+                      {!s.event && s.phase === 'day' && (
+                        <>
+                          <Btn
+                            onClick={() => {
+                              setWorkspacePreference('housing.view', '生活');
+                              navigate('housing');
+                            }}
+                          >
+                            回住所安排生活
+                          </Btn>
+                          <Do
+                            s={s}
+                            act={act}
+                            action={{ type: 'wait', minutes: 30 }}
+                          >
+                            等待30分钟
+                          </Do>
+                        </>
                       )}
                     </div>
                   </footer>
@@ -2112,6 +2710,7 @@ export default function Home() {
               <DialogDescription>
                 先处理风险，再安排生意；日历仅公开主题，实际价格会波动。
               </DialogDescription>
+              {s && <CitySchedule s={s} />}
               {tasks.map((task) => (
                 <div className="today-task" key={task.id}>
                   <div>

@@ -1,3 +1,4 @@
+import { setDay } from './helpers.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dispatch, maybeEncounter, newGame } from '../lib/game/engine.ts';
@@ -7,9 +8,9 @@ import {
   type ModelContext,
 } from '../lib/game/webmcp.ts';
 
-void test('optional tools expose only known v2 state and reject stale actions', async () => {
+void test('optional tools expose only known v3 state and reject stale actions', async () => {
   let s = newGame(123);
-  s.day = 2;
+  setDay(s, 2, 540);
   maybeEncounter(s, true);
   const visible = JSON.stringify(publicState(s));
   assert(!visible.includes('hiddenFact'));
@@ -59,6 +60,7 @@ void test('optional tools expose only known v2 state and reject stale actions', 
 
 void test('unresolved city report outcomes stay private', () => {
   let s = newGame(12);
+  s.clock.minute = 540;
   s.worlds = [];
   s = dispatch(s, { type: 'tea' }).state;
   assert(s.intel.some((i) => i.resolution));
@@ -95,13 +97,14 @@ void test('public action previews share maxima and confirmation without mutating
 
 void test('verification requires asking and public state masks unearned legacy clues', () => {
   let s = newGame(20260912);
+  s.clock.minute = 540;
   const tea = dispatch(s, { type: 'tea' });
   assert.equal(tea.error, undefined);
   s = tea.state;
   s.event = null;
   const entry = s.intel.find((i) => i.resolution)!;
   assert(entry);
-  s.day = entry.resolution!.due + 1;
+  setDay(s, entry.resolution!.due + 1, 540);
   const denied = dispatch(s, { type: 'visitIntel', id: entry.id });
   assert.match(denied.error!, /先追问出处/);
   assert.equal(denied.state, s);

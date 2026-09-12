@@ -112,8 +112,8 @@ export function run(
     if (s.phase === 'day') assert(attempt({ type: 'market' }));
   };
   const leave = () => {
-    if (s.phase === 'market') assert(attempt({ type: 'leave' }));
     resolve();
+    if (s.phase === 'day') assert(attempt({ type: 'leave' }));
   };
   const buy = (g: Good, q: number) => {
     if (q <= 0) return true;
@@ -145,8 +145,8 @@ export function run(
         !s.batches.some(
           (b) =>
             b.good === g &&
-            b.expires !== null &&
-            b.expires < publicCalendar(s)[0].start,
+            b.remainingMinutes !== null &&
+            b.remainingMinutes! < (publicCalendar(s)[0].start - s.day) * 1440,
         )
       )
         continue;
@@ -158,7 +158,10 @@ export function run(
       );
       const c = q ? inventoryCost(s, g, q) / q : 0;
       const expiry = s.batches.some(
-        (b) => b.good === g && b.expires !== null && b.expires <= s.day + 1,
+        (b) =>
+          b.good === g &&
+          b.remainingMinutes !== null &&
+          b.remainingMinutes! <= 1440,
       );
       if (
         produced ||
@@ -209,7 +212,9 @@ export function run(
         const o = s.commerce.orders.find((x) => x.id === original.id)!;
         const p = orderPreview(s, o);
         if (
-          (p.profit >= 20 || o.deadline <= s.day + 1 || p.deliverable) &&
+          (p.profit >= 20 ||
+            o.deadlineAt <= s.clock.minute + 1440 ||
+            p.deliverable) &&
           p.purchaseCost < s.cash - 65
         ) {
           for (const m of p.materials)
@@ -336,7 +341,9 @@ export function run(
             (quote(s, g).sell > c * 1.08 ||
               s.batches.some(
                 (b) =>
-                  b.good === g && b.expires !== null && b.expires <= s.day + 1,
+                  b.good === g &&
+                  b.remainingMinutes !== null &&
+                  b.remainingMinutes! <= 1440,
               ))
           )
             sell(g, q);
@@ -389,7 +396,6 @@ export function run(
       assert(attempt({ type: 'return', confirm: returnTerms(s) }));
       break;
     }
-    assert(attempt({ type: 'endDay' }));
     const feed = Math.min(
       s.hens.length,
       Math.floor(
@@ -402,21 +408,16 @@ export function run(
           ? 'inn'
           : 'temple'
         : s.housing.id;
-    let ok = attempt({
-      type: 'night',
-      meal:
-        quantity(s, 'bread') >= 1
-          ? 'bread'
-          : s.cash >=
-              HOUSING[s.housing.id].upkeep + 18 + (bed === 'inn' ? 30 : 0)
-            ? 'diner'
-            : 'none',
-      bed,
-      feed,
-    });
-    if (!ok)
-      ok = attempt({ type: 'night', meal: 'none', bed: 'temple', feed: 0 });
+    if (feed) attempt({ type: 'feed', count: feed });
+    if (quantity(s, 'bread') >= 1) attempt({ type: 'eat', meal: 'bread' });
+    else if (s.cash >= 18) attempt({ type: 'eat', meal: 'diner' });
+    if (s.clock.minute % 1440 < 1320)
+      attempt({ type: 'wait', minutes: 1320 - (s.clock.minute % 1440) });
+    let ok = attempt({ type: 'sleep', minutes: 480, bed });
+    if (!ok) ok = attempt({ type: 'sleep', minutes: 480, bed: 'temple' });
     assert(ok);
+    if (s.health > 0 && s.clock.minute % 1440 < 480)
+      attempt({ type: 'wait', minutes: 480 - (s.clock.minute % 1440) });
     assert(
       s.cash >= 0 &&
         s.stamina >= 0 &&

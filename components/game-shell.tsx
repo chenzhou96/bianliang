@@ -1,4 +1,7 @@
 'use client';
+import { clockDay, nextDailyTime, relativeMoment } from '@/lib/game/time';
+import { productionCompletionLabel } from '@/lib/game/production-time';
+import { FACILITIES } from '@/lib/game/home';
 import { useEffect, useRef } from 'react';
 import {
   GOODS,
@@ -64,11 +67,7 @@ export function PersistentAssets({
                 <span>
                   {RECIPE_MAP[j.recipeId].name} ×{number(j.outputUnits / 10)}
                 </span>
-                <small>
-                  {s.equipment.find((e) => e.id === j.equipmentId)?.installed
-                    ? `第${j.readyDay}日完工`
-                    : '设备封存 · 暂停'}
-                </small>
+                <small>{productionCompletionLabel(s, j)}</small>
               </div>
             ))}
           </div>
@@ -76,7 +75,13 @@ export function PersistentAssets({
         </section>
         <section>
           <h3>
-            设备 <small>{equipment.length}类</small>
+            设备与设施{' '}
+            <small>
+              {equipment.length +
+                s.home.facilities.length +
+                (s.home.cart ? 1 : 0)}
+              类
+            </small>
           </h3>
           <div className="equipment-cells">
             {equipment.map((k) => {
@@ -95,8 +100,22 @@ export function PersistentAssets({
                 </div>
               );
             })}
+            {s.home.facilities.map((f) => (
+              <div key={f.kind}>
+                <span>{FACILITIES[f.kind].name}</span>
+                <small>{f.installed ? '使用中' : '封存'}</small>
+              </div>
+            ))}
+            {s.home.cart && (
+              <div>
+                <span>手推车</span>
+                <small>可用</small>
+              </div>
+            )}
           </div>
-          {!equipment.length && <p>暂无设备</p>}
+          {!equipment.length && !s.home.facilities.length && !s.home.cart && (
+            <p>暂无设备</p>
+          )}
         </section>
         <section>
           <h3>房产</h3>
@@ -106,7 +125,9 @@ export function PersistentAssets({
               ? '自有产权'
               : s.housing.id === 'street'
                 ? '尚无住所'
-                : `租赁 · 已付至第${s.housing.paidThrough}日`}
+                : s.housing.paidThrough === null
+                  ? `租赁 · ${relativeMoment(nextDailyTime(s.clock.minute, 360), s.clock.minute)}首次缴费`
+                  : `租赁 · 已结清第${clockDay(s.housing.paidThrough)}日费用`}
             {s.housing.maintenanceSuspended ? ' · 维护暂停' : ''}
           </p>
         </section>

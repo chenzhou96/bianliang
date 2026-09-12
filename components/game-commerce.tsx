@@ -1,4 +1,5 @@
 'use client';
+import { formatClock, formatMoment, type Transport } from '@/lib/game/time';
 import { useState } from 'react';
 import {
   CUSTOMERS,
@@ -36,7 +37,10 @@ function Execute({
       <button className="btn" disabled={!!p.error} onClick={() => act(action)}>
         {label}
       </button>
-      <small>{p.error || (p.energy ? `${p.energy}体力` : '')}</small>
+      <small>
+        {p.error ||
+          `${p.minutes}分钟 · ${formatClock(p.finishAt)}完成 · ${Math.ceil(p.energy)}体力`}
+      </small>
       {matched && <small className="inline-success">✓ {latest.title}</small>}
       {!p.error && p.energy > 0 && p.confirmation && p.warning && (
         <small className="reason">{p.warning}</small>
@@ -56,6 +60,7 @@ export function Orders({
   const [mode, setMode] = useWorkspaceValue<string>('orders.mode', '可接订单');
   const [selected, select] = useWorkspaceValue<number>('orders.selected', 0);
   const [detail, setDetail] = useState(false);
+  const [transport, setTransport] = useState<Transport>('self');
   const orders = s.commerce.orders
     .filter((o) =>
       mode === '可接订单'
@@ -71,7 +76,7 @@ export function Orders({
     <section className="panel">
       <div className="panel-head">
         <h1>供货订单</h1>
-        <p>同时最多2单 · 合同价固定 · 截止日白天交齐</p>
+        <p>同时最多2单 · 合同价固定 · 截止日20:00前交齐</p>
       </div>
       <div className="toolbar">
         {['可接订单', '进行中', '近期记录', '熟客'].map((v) => (
@@ -91,6 +96,22 @@ export function Orders({
           </button>
         ))}
       </div>
+      {mode === '进行中' && (
+        <label>
+          交货搬运
+          <select
+            aria-label="交货搬运方式"
+            value={transport}
+            onChange={(e) => setTransport(e.target.value as Transport)}
+          >
+            <option value="self">自己搬</option>
+            <option value="cart" disabled={!s.home.cart}>
+              手推车
+            </option>
+            <option value="porter">脚夫 · 08—18时</option>
+          </select>
+        </label>
+      )}
       {mode === '熟客' ? (
         <Customers s={s} act={act} />
       ) : (
@@ -115,7 +136,7 @@ export function Orders({
                   </span>
                   <span>
                     {o.price.toLocaleString()}文
-                    <small>第{o.deadline}日截止</small>
+                    <small>{formatMoment(o.deadlineAt)}截止</small>
                   </span>
                 </button>
               ))}
@@ -166,7 +187,7 @@ export function Orders({
                       </div>
                       <div>
                         <dt>截止时间</dt>
-                        <dd>第{order.deadline}日白天（含当日）</dd>
+                        <dd>{formatMoment(order.deadlineAt)}（完成时刻）</dd>
                       </div>
                       <div>
                         <dt>违约最大损失</dt>
@@ -200,7 +221,11 @@ export function Orders({
                           <Execute
                             s={s}
                             act={act}
-                            action={{ type: 'deliverOrder', orderId: order.id }}
+                            action={{
+                              type: 'deliverOrder',
+                              orderId: order.id,
+                              transport,
+                            }}
                             label="交付全部货物"
                           />
                           <Execute
@@ -234,7 +259,7 @@ export function Orders({
                           <th>货物</th>
                           <th>已有/需要</th>
                           <th>缺少</th>
-                          <th>自产最快参考</th>
+                          <th>自产理论完工</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -248,7 +273,7 @@ export function Orders({
                             <td>
                               {m.earliest === null
                                 ? '需采购/添置条件'
-                                : `第${m.earliest}日`}
+                                : formatMoment(m.earliest)}
                             </td>
                           </tr>
                         ))}
@@ -317,12 +342,15 @@ function Customers({ s, act }: { s: GameState; act: (a: Action) => void }) {
             <h2>{CUSTOMERS[id].name}</h2>
             <p>
               {c.visited
-                ? CUSTOMERS[id].stories[Math.min(2, c.visited - 1)]
+                ? CUSTOMERS[id].stories[
+                    Math.min(CUSTOMERS[id].stories.length - 1, c.visited - 1)
+                  ]
                 : '你们已经相识，找个空闲时候去拜访一下。'}
             </p>
             <small>
-              关系{s.commerce.relations[id]}；达到3可接高风险订单。人物后续
-              {c.visited}/3。
+              关系{s.commerce.relations[id]}
+              ；达到3可接高风险订单，达到10解锁至交后续。人物后续
+              {c.visited}/{CUSTOMERS[id].stories.length}。
             </small>
             <Execute
               s={s}

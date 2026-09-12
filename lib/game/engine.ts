@@ -1,3 +1,39 @@
+import { productionEarliest } from './production-time.ts';
+import { formatMoment } from './time.ts';
+import { statusActive, STATUS_DURATION } from './status.ts';
+import { validContinuousSave } from './save-validation.ts';
+import { timelineEvents } from './timeline.ts';
+import {
+  newOpportunities,
+  generateOpportunities,
+  lotWeight,
+  tradeNet,
+  updateTradeMilestones,
+  TRADE_REWARDS,
+} from './market-opportunities.ts';
+import {
+  FACILITIES,
+  HOME_STORIES,
+  HOME_EVENTS,
+  hasFacility,
+  usedHomeSlots,
+} from './home.ts';
+import { transportQuote, type Transport } from './time.ts';
+import { actionTiming } from './action-time.ts';
+import {
+  OPENING_HOURS,
+  nextDailyTime,
+  formatClock,
+  newClock,
+  validClock,
+  clockDay,
+  lifeCycle,
+  timeOfDay,
+  canFinishAtVenue,
+  projectTime,
+  staminaCap,
+  sleepEfficiency,
+} from './time.ts';
 import {
   BUFFS,
   EQUIPMENT,
@@ -30,7 +66,6 @@ import {
   CUSTOMER_IDS,
   customerStage,
   customerOpportunity,
-  productionEarliest,
   validCommerce,
   MILESTONES,
 } from './commerce.ts';
@@ -71,7 +106,7 @@ export function pickWeighted<T extends { weight: number }>(
   return list[list.length - 1];
 }
 export function staminaMax(s: GameState) {
-  return s.health >= 70 ? 100 : s.health >= 40 ? 80 : 60;
+  return staminaCap(s.health, s.clock.sleepDebt);
 }
 export function quantity(s: GameState, g: Good) {
   return g === 'hen'
@@ -80,7 +115,9 @@ export function quantity(s: GameState, g: Good) {
         10;
 }
 export function capacity(s: GameState) {
-  return HOUSING[s.housing.id].capacity;
+  return Math.floor(
+    HOUSING[s.housing.id].capacity * (hasFacility(s, 'warehouse') ? 1.4 : 1),
+  );
 }
 export function occupied(s: GameState) {
   return s.batches.reduce((a, b) => a + b.units, 0);
@@ -88,13 +125,14 @@ export function occupied(s: GameState) {
 export function reserved(s: GameState) {
   return (
     occupied(s) +
+    (s.pendingTrade?.units ?? 0) +
     s.jobs
       .filter((j) => j.status === 'queued')
       .reduce((a, j) => a + j.outputUnits, 0)
   );
 }
 export function active(s: GameState, b: Buff) {
-  return (s.buffs[b] ?? 0) >= s.day;
+  return statusActive(s, b);
 }
 export function installed(s: GameState, kind: EquipmentKind) {
   return s.equipment.find((e) => e.kind === kind && e.installed);
@@ -138,7 +176,7 @@ function add(
   units: number,
   cost = 0,
   origin: Batch['origin'] = 'gift',
-  born = s.day,
+  _born = s.day,
 ) {
   const room = Math.max(0, capacity(s) - reserved(s));
   const accepted = Math.min(
@@ -152,7 +190,7 @@ function add(
       units: accepted,
       cost: units ? Math.round((cost * accepted) / units) : 0,
       origin,
-      expires: GOODS[g].life ? born + GOODS[g].life! - 1 : null,
+      remainingMinutes: GOODS[g].life ? GOODS[g].life! * 1440 : null,
     });
   if (accepted < units)
     log(
@@ -169,10 +207,16 @@ function consume(s: GameState, g: Good, units: number) {
     production = 0,
     productionCost = 0;
   s.batches.sort(
-    (a, b) => (a.expires ?? 99999) - (b.expires ?? 99999) || a.id - b.id,
+    (a, b) =>
+      (a.remainingMinutes ?? Infinity) - (b.remainingMinutes ?? Infinity) ||
+      a.id - b.id,
   );
   for (const b of s.batches) {
-    if (b.good !== g || !left || (b.expires !== null && b.expires < s.day))
+    if (
+      b.good !== g ||
+      !left ||
+      (b.remainingMinutes != null && b.remainingMinutes <= 0)
+    )
       continue;
     const take = Math.min(left, b.units);
     const c = take === b.units ? b.cost : Math.floor((b.cost * take) / b.units);
@@ -289,17 +333,33 @@ function emptyLedger() {
     housing: 0,
     living: 0,
     feed: 0,
+    social: 0,
     medical: 0,
     workIncome: 0,
   };
 }
 export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
   const s: GameState = {
+    marketOffers: newOpportunities(),
     commerce: newCommerce({ seed, day: 1, ledger: emptyLedger() }),
-    saveRevision: 2,
+    home: {
+      cart: false,
+      events: {},
+      visits: {},
+      facilities: [],
+      coldPriority: ['bread', 'egg', 'saltedEgg'],
+    },
+    clock: newClock(),
+    life: {
+      ateCycle: -1,
+      fed: [],
+      autoFeed: false,
+      lastDawn: 360,
+      wakeSummary: null,
+    },
+    saveRevision: 3,
     operationHistory: [],
-    nightPreference: null,
-    version: 2,
+    version: 3,
     rules: RULES.version,
     seed: seed >>> 0,
     rng: seed >>> 0,
@@ -315,7 +375,7 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
     weather: '晴',
     batches: [],
     hens: [],
-    buffs: { outsider: 3 },
+    buffs: { outsider: 480 + STATUS_DURATION.outsider },
     prices: {} as GameState['prices'],
     history: [],
     trend: {} as GameState['trend'],
@@ -382,6 +442,7 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
   add(s, 'firewood', 10);
   makeWorlds(s);
   s.history.push({ day: 1, prices: structuredClone(s.prices) });
+  generateOpportunities(s);
   log(s, '你带着800文、两个炊饼、两份粟米和少量原料来到汴梁。');
   return s;
 }
@@ -438,9 +499,14 @@ function followupEvent(
 }
 const repeatable = new Set(['work', 'meal', 'shelter', 'doctor']);
 export function maybeEncounter(s: GameState, force = false) {
-  if (s.event || s.encounterDay === s.day || s.day === 1) return;
+  if (
+    s.event ||
+    s.encounterDay === clockDay(s.life.lastDawn) ||
+    clockDay(s.life.lastDawn) === 1
+  )
+    return;
   const due = s.followups.find(
-    (f) => f.due <= s.day && s.relations[f.chain] === f.source,
+    (f) => f.dueAt <= s.clock.minute && s.relations[f.chain] === f.source,
   );
   if (due) {
     s.followups = s.followups.filter((f) => f !== due);
@@ -449,7 +515,7 @@ export function maybeEncounter(s: GameState, force = false) {
     if (!force && random(s) > 0.42) return;
     const eligible = EVENTS.filter(
       (f) =>
-        s.day - (s.cooldowns[f.id] ?? -99) >= 7 &&
+        (s.cooldowns[f.id] ?? 0) <= s.clock.minute &&
         (repeatable.has(f.id) ||
           f.variants.some((v) => !s.seen.includes(`${f.id}:${v.id}`))),
     );
@@ -481,10 +547,10 @@ export function maybeEncounter(s: GameState, force = false) {
     };
     if (!s.seen.includes(`${family.id}:${v.id}`))
       s.seen.push(`${family.id}:${v.id}`);
-    s.cooldowns[family.id] = s.day;
+    s.cooldowns[family.id] = s.clock.minute + 7 * 1440;
     s.familyCounts[family.id] = (s.familyCounts[family.id] ?? 0) + 1;
   }
-  s.encounterDay = s.day;
+  s.encounterDay = clockDay(s.life.lastDawn);
   s.stats.events++;
   log(s, `街巷偶遇：${s.event.title}。`);
 }
@@ -498,8 +564,7 @@ function effect(s: GameState, e: Effect, person: string, acquisitionCost = 0) {
   s.stamina = clamp(s.stamina + (e.stamina ?? 0), 0, staminaMax(s));
   s.reputation += e.reputation ?? 0;
   if (e.buff) {
-    s.buffs[e.buff] =
-      s.day + (e.buff === 'regular' ? 5 : e.buff === 'cold' ? 1 : 0);
+    s.buffs[e.buff] = s.clock.minute + STATUS_DURATION[e.buff];
     log(s, `获得「${BUFFS[e.buff].name}」：${BUFFS[e.buff].detail}`);
   }
   if (e.help) s.stats.helped++;
@@ -508,33 +573,34 @@ function effect(s: GameState, e: Effect, person: string, acquisitionCost = 0) {
     s.followups.length < 2 &&
     !s.followups.some((f) => f.chain === e.chain)
   ) {
-    s.relations[e.chain] = s.day;
+    s.relations[e.chain] = s.clock.minute;
     s.followups.push({
       chain: e.chain,
       person,
-      due: s.day + integer(s, 2, 7),
+      dueAt: s.clock.minute + integer(s, 2, 7) * 1440,
       branch: pickWeighted(s, [
         { weight: 4, b: 'gift' },
         { weight: 3, b: 'work' },
         { weight: 2, b: 'request' },
       ]).b as 'gift' | 'work' | 'request',
-      source: s.day,
+      source: s.clock.minute,
     });
   }
 }
 function requireDay(s: GameState) {
-  if (!['day', 'market'].includes(s.phase) || s.event)
+  if (s.phase !== 'day' || s.event)
     throw Error('请先结束当前安排或处理眼前的遭遇');
 }
 function finishAction(s: GameState, encounter = true) {
   if (encounter) maybeEncounter(s);
 }
-export function tradeStamina(s: GameState, g: Good, q: number) {
-  const weight = q * (g === 'hen' ? 2 : RULES.tradeStaminaPerUnit);
-  return (
-    Math.ceil(s.daily.tradeUnits + weight - 1e-9) -
-    Math.ceil(s.daily.tradeUnits - 1e-9)
-  );
+export function tradeStamina(
+  s: GameState,
+  g: Good,
+  q: number,
+  transport: Transport = 'self',
+) {
+  return transportQuote(q * (g === 'hen' ? 2 : 1), transport).stamina;
 }
 export function henCapacity(s: GameState) {
   return installed(s, 'coop') ? HOUSING[s.housing.id].henCapacity : 3;
@@ -609,7 +675,12 @@ export function recipeQuote(s: GameState, recipeId: string, n: number) {
   };
 }
 
-export function maximumTrade(s: GameState, good: Good, side: 'buy' | 'sell') {
+export function maximumTrade(
+  s: GameState,
+  good: Good,
+  side: 'buy' | 'sell',
+  transport: Transport = 'self',
+) {
   const scale = good === 'grain' ? 10 : 1;
   let lo = 0,
     hi =
@@ -621,7 +692,13 @@ export function maximumTrade(s: GameState, good: Good, side: 'buy' | 'sell') {
           );
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    const r = dispatch(s, { type: 'trade', side, good, quantity: mid / scale });
+    const r = dispatch(s, {
+      type: 'trade',
+      side,
+      good,
+      quantity: mid / scale,
+      transport,
+    });
     if (r.error) hi = mid - 1;
     else lo = mid;
   }
@@ -636,12 +713,13 @@ export function maximumProduction(s: GameState, recipeId: string) {
 }
 
 export function reservedFood(s: GameState, good: Good) {
-  const meal =
-    s.nightPreference?.meal ?? (quantity(s, 'bread') >= 1 ? 'bread' : 'diner');
+  const meal = quantity(s, 'bread') >= 1 ? 'bread' : 'diner';
   return (
-    (meal === good ? (meal === 'egg' ? 2 : 1) : 0) +
+    (s.life.ateCycle !== lifeCycle(s.clock.minute) && meal === good ? 1 : 0) +
     (good === 'grain'
-      ? (s.hens.length * (s.skills.husbandry >= 3 ? 1 : RULES.feed)) / 10
+      ? (s.hens.filter((h) => !s.life.fed.includes(h.id)).length *
+          (s.skills.husbandry >= 3 ? 1 : RULES.feed)) /
+        10
       : 0)
   );
 }
@@ -658,14 +736,31 @@ export function availableSurplus(s: GameState, good: Good) {
   );
 }
 export function actionEnergy(s: GameState, a: Action) {
+  try {
+    return rawActionEnergy(s, a);
+  } catch {
+    return 0;
+  }
+}
+function rawActionEnergy(s: GameState, a: Action) {
+  if (a.type === 'buyLot') {
+    const lot = s.marketOffers.lots.find((l) => l.id === a.lotId);
+    return lot
+      ? transportQuote(lotWeight(lot), a.transport ?? 'self').stamina
+      : 0;
+  }
+  if (a.type === 'supplyRequest')
+    return transportQuote(a.quantity, a.transport ?? 'self').stamina;
   if (a.type === 'deliverOrder') {
     const order = s.commerce.orders.find((o) => o.id === a.orderId);
     return order
-      ? Math.ceil(
-          s.daily.tradeUnits +
-            Object.values(order.goods).reduce((n, q) => n + q!, 0) -
-            1e-9,
-        ) - Math.ceil(s.daily.tradeUnits - 1e-9)
+      ? transportQuote(
+          Object.entries(order.goods).reduce(
+            (n, [g, q]) => n + q! * (g === 'hen' ? 2 : 1),
+            0,
+          ),
+          a.transport ?? 'self',
+        ).stamina
       : 0;
   }
   if (a.type === 'meetCustomer' || a.type === 'visitCustomer') return 5;
@@ -676,7 +771,8 @@ export function actionEnergy(s: GameState, a: Action) {
       return 0;
     }
   }
-  if (a.type === 'trade') return tradeStamina(s, a.good, a.quantity);
+  if (a.type === 'trade')
+    return tradeStamina(s, a.good, a.quantity, a.transport ?? 'self');
   if (a.type === 'produce')
     return RECIPE_MAP[a.recipeId]
       ? productionPlan(s, RECIPE_MAP[a.recipeId], a.quantity).energy
@@ -690,12 +786,31 @@ export function actionEnergy(s: GameState, a: Action) {
   if (a.type === 'askIntel' || a.type === 'visitIntel') return 5;
   if (a.type === 'choice') {
     const c = s.event?.choices.find((c) => c.id === a.id);
-    return (c?.cost.stamina ?? 0) + (c?.cost.ap ?? 0) * 10;
+    return c?.cost.stamina ?? 0;
   }
   return 0;
 }
 export function actionPreview(s: GameState, a: Action) {
-  const energy = actionEnergy(s, a);
+  let duration = 0;
+  let venue: import('./time.ts').Venue = 'home';
+  try {
+    const timing = actionTiming(s, a);
+    duration = timing.minutes;
+    venue = timing.venue;
+  } catch {
+    /* Dispatch reports unavailable legacy actions. */
+  }
+  let multiplier = 1;
+  try {
+    multiplier = projectTime(
+      s.clock,
+      duration,
+      a.type === 'sleep' ? { sleeping: true } : {},
+    ).averageExertion;
+  } catch {
+    /* Dispatch validates durations. */
+  }
+  const energy = actionEnergy(s, a) * multiplier;
   const order =
     a.type === 'acceptOrder'
       ? s.commerce.orders.find((o) => o.id === a.orderId)
@@ -716,16 +831,65 @@ export function actionPreview(s: GameState, a: Action) {
         ? ({ ...a, confirm: returnTerms(s) } as Action)
         : a,
   );
+  const finishAt = s.clock.minute + duration;
+  const crossesDawn = nextDailyTime(s.clock.minute, 360) <= finishAt;
+  const uncertainOutcome = a.type === 'choice';
+  const theftRisk =
+    a.type === 'sleep' &&
+    (a.bed === 'street' ||
+      a.bed === 'temple' ||
+      (a.bed !== 'inn' &&
+        (s.housing.maintenanceSuspended ||
+          (crossesDawn && s.cash < HOUSING[s.housing.id].upkeep))));
+  const deadlineRisks = s.commerce.orders.filter(
+    (o) =>
+      o.status === 'accepted' &&
+      o.deadlineAt >= s.clock.minute &&
+      o.deadlineAt <= finishAt &&
+      !(a.type === 'deliverOrder' && a.orderId === o.id),
+  );
+  const spoilage = result.state.logs.filter(
+    (l) => l.id >= s.nextId && l.text.endsWith('已经腐坏。'),
+  );
+  const opening = venue === 'home' ? null : OPENING_HOURS[venue];
+  const opensNext =
+    opening && !canFinishAtVenue(s.clock.minute, duration, venue)
+      ? nextDailyTime(s.clock.minute, opening[0])
+      : null;
   return {
     error: result.error,
+    startsAt: s.clock.minute,
+    openingHours: opening,
+    nextOpeningAt: opensNext,
+    minutes: duration,
+    finishAt,
+    healthChange: uncertainOutcome ? null : result.state.health - s.health,
+    staminaChange: uncertainOutcome ? null : result.state.stamina - s.stamina,
+    cashChange:
+      uncertainOutcome || theftRisk ? null : result.state.cash - s.cash,
     energy,
-    confirmation:
-      !!risky ||
-      returning ||
-      (energy > 0 && s.stamina >= 10 && s.stamina - energy < 10),
+    confirmation: !!risky || returning,
     warning: [
+      opensNext
+        ? `下次可办理：${formatMoment(opensNext)}；营业${formatClock(opening![0])}—${opening![1] === 1440 ? '24:00' : formatClock(opening![1])}。`
+        : '',
+      crossesDawn && HOUSING[s.housing.id].upkeep > 0
+        ? `期间经过06:00住房账单：${HOUSING[s.housing.id].upkeep}文；不足时租房退租、产权房暂停维护。`
+        : '',
+      ...deadlineRisks.map(
+        (o) =>
+          `期间订单「${o.title}」于${formatMoment(o.deadlineAt)}截止，请先交货。`,
+      ),
+      ...spoilage.map((l) => `${l.text}${l.items ?? ''}`),
+      uncertainOutcome
+        ? '回应结果尚未确定；按已知线索判断，不预先显示随机报酬。'
+        : '',
+      theftRisk ? '此住宿有失窃风险，现金变化无法预先确定。' : '',
+      a.type !== 'sleep' && duration > 0 && multiplier > 1
+        ? `困倦使本次行动体力成本增至${multiplier.toFixed(2)}倍。`
+        : '',
       energy > 0 && s.stamina >= 10 && s.stamina - energy < 10
-        ? '这次操作会让体力低于10：健康−2，并进入劳累。'
+        ? '这次操作后体力将低于10，可安排休息或睡眠。'
         : '',
       a.type === 'trade' &&
       a.side === 'sell' &&
@@ -733,7 +897,7 @@ export function actionPreview(s: GameState, a: Action) {
         ? '此次出售将动用口粮、饲料或订单备货，请及时补齐。'
         : '',
       risky
-        ? `接单冻结保证金${order.deposit}文；逾期或放弃全额没收，客户关系−2。第${order.deadline}日白天截止。`
+        ? `接单冻结保证金${order.deposit}文；逾期或放弃全额没收，客户关系−2。${formatMoment(order.deadlineAt)}截止。`
         : '',
       abandoned
         ? `放弃「${abandoned.title}」将没收已冻结保证金${abandoned.deposit}文，客户关系−${abandoned.highRisk ? 2 : 1}；已经投入的货物保留。`
@@ -747,120 +911,6 @@ export function actionPreview(s: GameState, a: Action) {
   };
 }
 
-export function nightPreview(
-  s: GameState,
-  a: Extract<Action, { type: 'night' }>,
-) {
-  const validMeals = ['bread', 'egg', 'saltedEgg', 'grain', 'diner', 'none'];
-  const validBeds = [
-    'inn',
-    'temple',
-    'street',
-    'room',
-    'courtyard',
-    'yard',
-    'mansion',
-  ];
-  if (!validMeals.includes(a.meal) || !validBeds.includes(a.bed))
-    throw Error('请选择有效的晚饭与住宿');
-  if (!Number.isInteger(a.feed) || a.feed < 0 || a.feed > s.hens.length)
-    throw Error('喂养数量不正确');
-  const fixed = ['room', 'courtyard', 'yard', 'mansion'].includes(a.bed);
-  if (fixed && a.bed !== s.housing.id) throw Error('只能使用当前住所');
-  const home = HOUSING[s.housing.id];
-  const mealCost = a.meal === 'diner' ? 18 : 0;
-  const innCost = a.bed === 'inn' ? 30 : 0;
-  const housingCost = home.upkeep;
-  if (s.cash < mealCost + innCost) throw Error('现金不足以支付晚饭和临时住宿');
-  const evict =
-    home.kind === 'rent' && s.cash - mealCost - innCost < housingCost;
-  const maintenanceSkipped =
-    home.kind === 'owned' && s.cash - mealCost - innCost < housingCost;
-  const paidHousing = evict || maintenanceSkipped ? 0 : housingCost;
-  const feedUnits = s.skills.husbandry >= 3 ? 1 : RULES.feed;
-  const grain = (a.meal === 'grain' ? 10 : 0) + a.feed * feedUnits;
-  const foodNeed =
-    a.meal === 'bread'
-      ? 1
-      : a.meal === 'egg'
-        ? 2
-        : a.meal === 'saltedEgg'
-          ? 1
-          : 0;
-  if (foodNeed && quantity(s, a.meal as Good) < foodNeed)
-    throw Error('晚饭库存不足');
-  if (quantity(s, 'grain') * 10 < grain)
-    throw Error('粟米不足，晚饭与喂鸡共用同一份库存');
-  const effectiveBed =
-    fixed && (evict || maintenanceSkipped) ? 'street' : a.bed;
-  const healthChange =
-    (a.meal === 'none' ? -8 : 0) +
-    (effectiveBed === 'street' ? -3 : 0) +
-    (active(s, 'cold') ? -2 : 0) +
-    (a.meal !== 'none' && !['street', 'temple'].includes(effectiveBed) ? 2 : 0);
-  const recovery =
-    effectiveBed === 'inn'
-      ? 55
-      : effectiveBed === 'temple'
-        ? 35
-        : effectiveBed === 'street'
-          ? 20
-          : home.recovery;
-  const food = foodNeed
-    ? `${GOODS[a.meal as Good].name} −${foodNeed}`
-    : a.meal === 'grain'
-      ? '粟米 −1'
-      : a.meal === 'diner'
-        ? '食肆用餐'
-        : '不吃饭';
-  const nextHealth = clamp(s.health + healthChange, 0, 100);
-  return {
-    cash: mealCost + innCost + paidHousing,
-    mealCost,
-    innCost,
-    housingCost: paidHousing,
-    grain: grain / 10,
-    feedUnits,
-    food,
-    evict,
-    maintenanceSkipped,
-    effectiveBed,
-    healthChange,
-    recovery: clamp(
-      recovery +
-        (a.meal === 'diner' || active(s, 'warm') ? 5 : 0) -
-        (a.meal === 'none' ? 10 : 0),
-      0,
-      nextHealth >= 70 ? 100 : nextHealth >= 40 ? 80 : 60,
-    ),
-    unfed: s.hens.slice(a.feed).map((h) => h.id),
-  };
-}
-
-function completeJobs(s: GameState) {
-  for (const j of s.jobs.filter((x) => x.status === 'queued')) {
-    if (
-      !s.equipment.find((e) => e.id === j.equipmentId)?.installed ||
-      s.housing.maintenanceSuspended
-    ) {
-      j.readyDay++;
-      continue;
-    }
-    if (j.readyDay > s.day) continue;
-    const r = RECIPE_MAP[j.recipeId] as Recipe;
-    const eq = s.equipment.find((e) => e.id === j.equipmentId);
-    if (eq) eq.jobId = null;
-    j.status = 'ready';
-    gainXp(s, r.industry, j.quantity);
-    add(s, r.output, j.outputUnits, j.inputCost, 'production', s.day);
-    log(
-      s,
-      `生产完成：${r.name} ×${j.quantity}。`,
-      0,
-      `${GOODS[r.output].name} +${j.outputUnits / 10}`,
-    );
-  }
-}
 function productionMultiplier(s: GameState, r: Recipe) {
   const level = s.skills[r.industry];
   return level >= 3 ? 0.8 : level >= 2 ? 0.9 : 1;
@@ -876,7 +926,9 @@ export function orderPreview(s: GameState, order: Order) {
     const good = id as Good;
     const owned = s.batches
       .filter(
-        (b) => b.good === good && (b.expires === null || b.expires >= s.day),
+        (b) =>
+          b.good === good &&
+          (b.remainingMinutes == null || b.remainingMinutes > 0),
       )
       .reduce((n, b) => n + b.units / 10, 0);
     const missing = Math.max(0, required! - owned);
@@ -887,7 +939,7 @@ export function orderPreview(s: GameState, order: Order) {
       missing,
       buyCost: Math.ceil(missing * quote(s, good).buy),
       stockCost: inventoryCost(s, good, Math.min(owned, required!)),
-      earliest: missing ? productionEarliest(s, good, missing) : s.day,
+      earliest: missing ? productionEarliest(s, good, missing) : s.clock.minute,
     };
   });
   const purchaseCost = materials.reduce((n, m) => n + m.buyCost, 0);
@@ -899,7 +951,7 @@ export function orderPreview(s: GameState, order: Order) {
     carrying: actionEnergy(s, { type: 'deliverOrder', orderId: order.id }),
     deliverable:
       order.status === 'accepted' &&
-      order.deadline >= s.day &&
+      order.deadlineAt >= s.clock.minute &&
       materials.every((m) => m.missing === 0),
     risk:
       s.cash < purchaseCost + (order.status === 'offered' ? order.deposit : 0)
@@ -907,10 +959,10 @@ export function orderPreview(s: GameState, order: Order) {
         : materials.some(
               (m) =>
                 m.missing &&
-                (m.earliest === null || m.earliest > order.deadline),
+                (m.earliest === null || m.earliest > order.deadlineAt),
             )
           ? '部分缺货无法按当前设备及时自产，可考虑采购'
-          : '按当前行情估算，实际采购价与生产安排可能变化',
+          : '自产时间为原料、体力与仓位齐备时的理论下限，另需搬运交付；采购价与生产安排可能变化',
   };
 }
 function failOrder(s: GameState, order: Order) {
@@ -935,10 +987,33 @@ function failOrder(s: GameState, order: Order) {
     `订单「${order.title}」未履约，没收已冻结保证金${order.deposit}文，客户关系下降。${CUSTOMERS[order.customer].failure}`,
   );
 }
-function deliverOrder(s: GameState, order: Order) {
-  const preview = orderPreview(s, order);
+function deliverOrder(
+  s: GameState,
+  order: Order,
+  transport: Transport = 'self',
+) {
+  const preview = {
+    ...orderPreview(s, order),
+    carrying: actionEnergy(s, {
+      type: 'deliverOrder',
+      orderId: order.id,
+      transport,
+    }),
+  };
+  const freight = transportQuote(
+    Object.entries(order.goods).reduce(
+      (n, [g, q]) => n + q! * (g === 'hen' ? 2 : 1),
+      0,
+    ),
+    transport,
+  ).fee;
+  if (freight) {
+    money(s, -freight, '交货搬运费');
+    s.ledger.tradeCost += freight;
+    s.stats.profit -= freight;
+  }
   if (order.status !== 'accepted') throw Error('订单尚未接取或已结算');
-  if (s.day > order.deadline) throw Error('订单已超过交期');
+  if (s.clock.minute > order.deadlineAt) throw Error('订单已超过交期');
   const missing = preview.materials.filter((m) => m.missing > 0);
   if (missing.length)
     throw Error(
@@ -982,129 +1057,14 @@ function deliverOrder(s: GameState, order: Order) {
   s.commerce.customers[order.customer] = customer;
   s.story = `「${order.title}」如约交齐，收到货款${order.price}文${order.deposit ? `并取回保证金${order.deposit}文` : ''}。`;
 }
-function settleNight(s: GameState, a: Extract<Action, { type: 'night' }>) {
-  if (s.phase !== 'night' || s.event) throw Error('现在不能结算夜晚');
-  const p = nightPreview(s, a);
-  for (const order of s.commerce.orders)
-    if (order.deadline <= s.day) failOrder(s, order);
-  s.commerce.positiveDays =
-    businessProfit(s) > s.commerce.profitAtDawn
-      ? s.commerce.positiveDays + 1
-      : 0;
-  updateMilestones(s);
-  money(s, -p.cash, '晚饭、住宿与住宅费用');
-  s.ledger.living += p.mealCost + p.innCost;
-  s.ledger.housing += p.housingCost;
-  if (p.evict) {
-    s.housing = {
-      id: 'street',
-      paidThrough: null,
-      maintenanceSuspended: false,
-    };
-    for (const e of s.equipment) e.installed = false;
-    log(s, '无力付租，退回街头；设备封存，生产暂停，货物保留。');
-  } else s.housing.maintenanceSuspended = p.maintenanceSkipped;
-  if (p.maintenanceSkipped) log(s, '维护暂停：新开工与住宅恢复停用。');
-  if (a.meal === 'bread') s.ledger.living += consume(s, 'bread', 10).cost;
-  if (a.meal === 'egg') s.ledger.living += consume(s, 'egg', 20).cost;
-  if (a.meal === 'saltedEgg')
-    s.ledger.living += consume(s, 'saltedEgg', 10).cost;
-  if (a.meal === 'grain') s.ledger.living += consume(s, 'grain', 10).cost;
-  if (a.feed) {
-    const c = consume(s, 'grain', a.feed * p.feedUnits);
-    s.ledger.feed += c.cost;
-    s.ledger.feedPending += c.cost;
-    s.stats.feedCost += c.cost;
-    if (s.skills.husbandry > 0) gainXp(s, 'husbandry', a.feed);
-    log(s, `喂养${a.feed}只母鸡。`, 0, `粟米 −${(a.feed * p.feedUnits) / 10}`);
-  }
-  s.health = clamp(s.health + p.healthChange, 0, 100);
-  s.stamina = p.recovery;
-  const theft =
-    p.effectiveBed === 'temple' ? 0.1 : p.effectiveBed === 'street' ? 0.2 : 0;
-  if (theft && random(s) < theft) {
-    const loss = Math.min(50, Math.floor(s.cash * 0.1));
-    money(s, -loss, '夜间失窃');
-    s.ledger.losses += loss;
-  }
-  const coop = installed(s, 'coop');
-  let eggs = 0,
-    dead = 0;
-  s.hens = s.hens.filter((h, i) => {
-    if (i < a.feed) {
-      h.hunger = 0;
-      if (
-        random(s) <
-        (coop ? RULES.coopChance : RULES.eggChance) +
-          (s.skills.husbandry >= 2 ? 0.1 : 0)
-      )
-        eggs++;
-    } else h.hunger++;
-    if (h.hunger >= 3) {
-      dead++;
-      return false;
-    }
-    return true;
-  });
-  if (eggs) {
-    add(s, 'egg', eggs * 10, s.ledger.feedPending, 'production', s.day + 1);
-    s.ledger.feedPending = 0;
-    s.stats.eggs += eggs;
-  }
-  for (const b of s.batches)
-    if (b.expires !== null && b.expires <= s.day) {
-      s.ledger.losses += b.cost;
-      log(s, '过期货物已丢弃。', 0, `${GOODS[b.good].name} −${b.units / 10}`);
-    }
-  s.batches = s.batches.filter((b) => b.expires === null || b.expires > s.day);
-  log(
-    s,
-    `夜间结算：健康${s.health}，体力${s.stamina}；产蛋${eggs}枚${dead ? `，${dead}只母鸡死亡` : ''}。`,
-  );
-  if (s.health <= 0) {
-    s.ending = 'death';
-    s.phase = 'ended';
-    s.deathCause = '健康耗尽';
-    s.story = '城里的叫卖声渐渐远了。你的旅程在这一夜结束。';
-    return;
-  }
-  if (s.health < 10 && !s.stats.lowDay) s.stats.lowDay = s.day;
-  s.stats.survivedLow = !!s.stats.lowDay;
-  s.day++;
-  s.stats.days = s.day;
-  s.daily = {
-    work: 0,
-    lessons: 0,
-    treatment: 0,
-    rest: 0,
-    snack: 0,
-    tradeUnits: 0,
-  };
-  s.encounterDay = 0;
-  s.teaDay = 0;
-  for (const b of Object.keys(s.buffs) as Buff[])
-    if (!active(s, b)) delete s.buffs[b];
-  completeJobs(s);
-  s.weather = random(s) < 0.2 ? '阴' : '晴';
-  updatePrices(s);
-  s.commerce.profitAtDawn = businessProfit(s);
-  generateOrders(s);
-  for (const w of s.worlds.filter(
-    (w) => w.truth !== 'false' && w.start === s.day,
-  ))
-    log(s, w.publicText);
-  s.phase = 'day';
-  s.story = `第${s.day}日，街市渐渐醒来。昨夜产蛋${eggs}枚，完成的货物已经入库。`;
-}
-
 function addIntel(
   s: GameState,
   t: (typeof INFO_TEMPLATES)[number],
   world?: GameState['worlds'][number],
 ) {
   const semantic = t.semantic;
-  s.intelSeen[semantic] = s.day;
-  s.intelSeen[`skeleton:${t.skeleton}`] = s.day;
+  s.intelSeen[semantic] = s.clock.minute + 20 * 1440;
+  s.intelSeen[`skeleton:${t.skeleton}`] = s.clock.minute + 7 * 1440;
   const due = s.day + integer(s, 2, 6);
   const happens = random(s) < 0.72;
   const entry: IntelEntry = {
@@ -1179,8 +1139,6 @@ export function operationResponse(
     uninstall: '封存设备',
     produce: '开工',
     trade: action.type === 'trade' && action.side === 'buy' ? '买入' : '卖出',
-    night: '夜间结算',
-    endDay: '安排今晚',
     askIntel: '追问',
     visitIntel: '回访',
     choice: '回应遭遇',
@@ -1229,12 +1187,16 @@ function performTrade(
     (g !== 'grain' && !Number.isInteger(q))
   )
     throw Error('数量须为正数；粟米可输入一位小数');
-  const costStamina = tradeStamina(s, g, q);
+  const costStamina = tradeStamina(s, g, q, action.transport ?? 'self');
   if (s.stamina < costStamina) throw Error(`搬运需要${costStamina}体力`);
+  const freight = transportQuote(
+    q * (g === 'hen' ? 2 : 1),
+    action.transport ?? 'self',
+  ).fee;
   const p = quote(s, g),
     u = Math.round(q * 10);
   if (action.side === 'buy') {
-    const cost = Math.ceil(p.buy * q);
+    const cost = Math.ceil(p.buy * q) + freight;
     if (s.cash < cost) throw Error('现金不足');
     if (g === 'hen') {
       if (s.hens.length + q > henCapacity(s)) throw Error('当前养殖容量不足');
@@ -1247,6 +1209,11 @@ function performTrade(
     money(s, -cost, `买入${GOODS[g].name} ×${q}`);
     s.ledger.purchases += cost;
   } else {
+    if (freight) {
+      money(s, -freight, '销售搬运费');
+      s.ledger.tradeCost += freight;
+      s.stats.profit -= freight;
+    }
     if (quantity(s, g) < q) throw Error('货物不足');
     const income = Math.floor(p.sell * q);
     if (g === 'hen') {
@@ -1282,7 +1249,526 @@ function performTrade(
   s.story = `成交${GOODS[g].name} ×${q}，搬运消耗${costStamina}体力。`;
 }
 
+function feedHens(s: GameState, count: number) {
+  const hungry = s.hens.filter((h) => !s.life.fed.includes(h.id));
+  if (!Number.isSafeInteger(count) || count < 1 || count > hungry.length)
+    throw Error('请选择尚未喂养的母鸡数量');
+  const units = count * (s.skills.husbandry >= 3 ? 1 : RULES.feed);
+  const cost = consume(s, 'grain', units).cost;
+  s.ledger.feed += cost;
+  s.ledger.feedPending += cost;
+  s.stats.feedCost += cost;
+  s.life.fed.push(...hungry.slice(0, count).map((h) => h.id));
+  if (s.skills.husbandry > 0) gainXp(s, 'husbandry', count);
+  s.story = `已喂养${count}只母鸡，下次清晨06:00前不会重复消耗饲料。`;
+  log(s, s.story);
+}
+
+function settleDawn(s: GameState) {
+  if (s.life.lastDawn >= s.clock.minute) return;
+  const home = HOUSING[s.housing.id];
+  if (s.cash >= home.upkeep) {
+    money(s, -home.upkeep, '每日住宅费用');
+    s.ledger.housing += home.upkeep;
+    s.housing.maintenanceSuspended = false;
+    s.housing.paidThrough = s.clock.minute;
+  } else if (home.kind === 'rent') {
+    s.housing = {
+      id: 'street',
+      paidThrough: null,
+      maintenanceSuspended: false,
+    };
+    for (const eq of s.equipment) eq.installed = false;
+    for (const facility of s.home.facilities) facility.installed = false;
+    log(s, '无力付租，退回街头；设备和货物保留，生产暂停。');
+  } else if (home.kind === 'owned') {
+    s.housing.maintenanceSuspended = true;
+    log(s, '住宅维护暂停，设施和生产暂不可用。');
+  }
+  let eggs = 0;
+  s.hens = s.hens.filter((h) => {
+    if (s.life.fed.includes(h.id)) {
+      h.hunger = 0;
+      if (
+        random(s) <
+        (installed(s, 'coop') ? RULES.coopChance : RULES.eggChance) +
+          (s.skills.husbandry >= 2 ? 0.1 : 0)
+      )
+        eggs++;
+    } else h.hunger++;
+    if (h.hunger >= 3) log(s, '一只母鸡连续三个周期未喂养，饿死了。');
+    return h.hunger < 3;
+  });
+  if (eggs) {
+    add(s, 'egg', eggs * 10, s.ledger.feedPending, 'production');
+    s.ledger.feedPending = 0;
+    s.stats.eggs += eggs;
+  }
+  s.life.fed = [];
+  s.life.lastDawn = s.clock.minute;
+  log(s, `清晨生活：产蛋${eggs}枚。`);
+}
+
+function refreshDawn(s: GameState) {
+  s.commerce.positiveDays =
+    businessProfit(s) > s.commerce.profitAtDawn
+      ? s.commerce.positiveDays + 1
+      : 0;
+  s.daily = {
+    work: 0,
+    lessons: 0,
+    treatment: 0,
+    rest: 0,
+    snack: 0,
+    tradeUnits: 0,
+  };
+  s.encounterDay = 0;
+  s.teaDay = 0;
+  s.weather = random(s) < 0.2 ? '阴' : '晴';
+  updatePrices(s);
+  s.commerce.profitAtDawn = businessProfit(s);
+  s.marketOffers.profitStreak =
+    tradeNet(s) > s.marketOffers.profitAtDawn
+      ? s.marketOffers.profitStreak + 1
+      : 0;
+  s.marketOffers.profitAtDawn = tradeNet(s);
+  generateOpportunities(s);
+  generateOrders(s);
+  log(s, '清晨：行情和商户需求已更新，生活费用已结清。');
+}
+
+function chilledBatches(s: GameState) {
+  const protectedIds = new Set<number>();
+  if (!hasFacility(s, 'coldStorage')) return protectedIds;
+  let room = 200;
+  const rank = (g: Good) => {
+    const i = s.home.coldPriority.indexOf(g);
+    return i < 0 ? 999 : i;
+  };
+  const candidates = s.batches
+    .filter((b) => b.remainingMinutes != null)
+    .sort(
+      (a, b) =>
+        rank(a.good) - rank(b.good) ||
+        a.remainingMinutes! - b.remainingMinutes! ||
+        a.id - b.id,
+    );
+  for (const b of candidates) {
+    if (room <= 0) break;
+    if (b.units > room) {
+      const cost = Math.floor((b.cost * room) / b.units);
+      const part = { ...b, id: s.nextId++, units: room, cost };
+      b.units -= room;
+      b.cost -= cost;
+      s.batches.push(part);
+      protectedIds.add(part.id);
+      room = 0;
+    } else {
+      protectedIds.add(b.id);
+      room -= b.units;
+    }
+  }
+  return protectedIds;
+}
+
+function advanceGameTime(
+  s: GameState,
+  minutes: number,
+  sleeping = false,
+  bed?: import('./types.ts').Bed,
+) {
+  for (let i = 0; i < minutes; i++) {
+    const due = timelineEvents(s.clock.minute, s.clock.minute + 1, []);
+    const projection = projectTime(s.clock, 1);
+    const cold = active(s, 'cold');
+    const warm = active(s, 'warm');
+    if (sleeping) {
+      s.clock.minute++;
+      s.clock.sleepDebt = Math.max(0, s.clock.sleepDebt - 1 / 30);
+      const effectiveBed =
+        !['inn', 'temple', 'street'].includes(bed ?? '') &&
+        (bed !== s.housing.id || s.housing.maintenanceSuspended)
+          ? 'street'
+          : bed;
+      const recovery =
+        effectiveBed === 'inn'
+          ? 55
+          : effectiveBed === 'temple'
+            ? 35
+            : effectiveBed === 'street'
+              ? 20
+              : HOUSING[s.housing.id].recovery;
+      s.stamina +=
+        ((recovery + (warm ? 5 : 0)) / 480) *
+        sleepEfficiency(s.clock.minute - 0.5) *
+        (effectiveBed === s.housing.id && hasFacility(s, 'bedroom') ? 1.15 : 1);
+      if (effectiveBed === 'street') s.health -= 3 / 480;
+      const theft =
+        effectiveBed === 'street' ? 0.2 : effectiveBed === 'temple' ? 0.1 : 0;
+      if (theft && random(s) < 1 - (1 - theft) ** (1 / 480)) {
+        const loss = Math.min(50, Math.floor(s.cash * 0.1));
+        money(s, -loss, '临时住宿失窃');
+        s.ledger.losses += loss;
+      }
+    } else {
+      s.clock = projection.clock;
+      s.health -= projection.healthLoss;
+    }
+    if (cold) s.health -= 2 / 1440;
+    s.day = clockDay(s.clock.minute);
+    s.stats.days = s.day;
+    // Life-cycle health is settled before same-minute spoilage, fees and output.
+    if (
+      due.some((e) => e.kind === 'housing') &&
+      s.life.lastDawn < s.clock.minute &&
+      s.life.ateCycle !== lifeCycle(s.clock.minute) - 1
+    ) {
+      s.health -= 8;
+      log(s, '清晨到了，昨日至今未吃主餐，健康−8。');
+    }
+    const clockMinute = timeOfDay(s.clock.minute);
+    if (!sleeping && clockMinute === 1020)
+      log(s, '17:00：普通市场将在18:00收市，请预留搬运时间。');
+    if (!sleeping && clockMinute === 1320)
+      log(s, '22:00：夜已深，继续行动的体力成本将逐渐增加。');
+    if (!sleeping && clockMinute === 120)
+      log(s, '02:00：继续熬夜开始损害健康，代价会逐渐加重。');
+    if (
+      !sleeping &&
+      clockMinute === 1080 &&
+      s.life.ateCycle !== lifeCycle(s.clock.minute)
+    )
+      log(s, '还未吃主餐：请在明日06:00前安排饮食。');
+    if (s.health <= 0) {
+      s.health = 0;
+      s.phase = 'ended';
+      s.ending = 'death';
+      s.deathCause = '健康耗尽';
+      break;
+    }
+    if (s.pendingTrade) {
+      for (const b of s.pendingTrade.batches)
+        if (b.remainingMinutes != null) b.remainingMinutes--;
+    }
+    const chilled = chilledBatches(s);
+    for (const b of s.batches) {
+      if (b.remainingMinutes != null)
+        b.remainingMinutes -= chilled.has(b.id) ? 0.5 : 1;
+      if (b.remainingMinutes != null && b.remainingMinutes <= 0) {
+        s.ledger.losses += b.cost;
+        log(
+          s,
+          `${GOODS[b.good].name}已经腐坏。`,
+          0,
+          `损失${b.units / 10}${GOODS[b.good].unit}`,
+        );
+      }
+    }
+    s.batches = s.batches.filter(
+      (b) => b.remainingMinutes == null || b.remainingMinutes > 0,
+    );
+    if (
+      due.some((e) => e.id.startsWith('clock:autofeed:')) &&
+      s.life.autoFeed
+    ) {
+      const units = s.skills.husbandry >= 3 ? 1 : RULES.feed;
+      const count = Math.min(
+        s.hens.filter((h) => !s.life.fed.includes(h.id)).length,
+        Math.floor((quantity(s, 'grain') * 10) / units),
+      );
+      if (count) feedHens(s, count);
+      const remaining = s.hens.filter((h) => !s.life.fed.includes(h.id)).length;
+      if (remaining)
+        log(
+          s,
+          `自动喂养饲料不足：仍有${remaining}只母鸡未喂，请在今天06:00前补齐。`,
+        );
+    }
+    if (due.some((e) => e.kind === 'housing')) settleDawn(s);
+    if (s.health <= 0) {
+      s.health = 0;
+      s.phase = 'ended';
+      s.ending = 'death';
+      s.deathCause = '健康耗尽';
+      break;
+    }
+    for (const j of s.jobs.filter((j) => j.status === 'queued')) {
+      if (
+        !s.equipment.some((e) => e.id === j.equipmentId && e.installed) ||
+        s.housing.maintenanceSuspended
+      )
+        continue;
+      j.remainingMinutes = Math.max(0, j.remainingMinutes - 1);
+      if (j.remainingMinutes === 0) {
+        j.status = 'ready';
+        const eq = s.equipment.find((e) => e.id === j.equipmentId);
+        if (eq) eq.jobId = null;
+        const recipe = RECIPE_MAP[j.recipeId];
+        gainXp(s, recipe.industry, j.quantity);
+        add(s, recipe.output, j.outputUnits, j.inputCost, 'production');
+        log(s, `${recipe.name}生产完成，已入库。`);
+      }
+    }
+    if (due.some((e) => e.kind === 'market')) refreshDawn(s);
+    // The current action may deliver exactly at its deadline; expiry follows it.
+    if (i < minutes - 1) expireTimedOrders(s);
+    s.stamina = clamp(s.stamina, 0, staminaMax(s));
+    if (s.health <= 0) {
+      s.health = 0;
+      s.phase = 'ended';
+      s.ending = 'death';
+      s.deathCause = '健康耗尽';
+      break;
+    }
+  }
+  if (sleeping && minutes >= 240) s.clock.awakeMinutes = 0;
+}
+
+function expireTimedOrders(s: GameState) {
+  for (const order of s.commerce.orders) {
+    if (order.deadlineAt <= s.clock.minute) failOrder(s, order);
+  }
+}
+
+function reserveTrade(s: GameState, a: Action) {
+  const outgoing: Partial<Record<Good, number>> = {};
+  let cash = 0,
+    units = 0;
+  if (a.type === 'trade') {
+    const fee = transportQuote(
+      a.quantity * (a.good === 'hen' ? 2 : 1),
+      a.transport ?? 'self',
+    ).fee;
+    if (a.side === 'buy') {
+      cash = Math.ceil(quote(s, a.good).buy * a.quantity) + fee;
+      units = a.good === 'hen' ? 0 : Math.round(a.quantity * 10);
+    } else {
+      cash = fee;
+      outgoing[a.good] = a.quantity;
+    }
+  } else if (a.type === 'buyLot') {
+    const lot = s.marketOffers.lots.find((l) => l.id === a.lotId)!;
+    cash =
+      lot.price + transportQuote(lotWeight(lot), a.transport ?? 'self').fee;
+    units = lotWeight(lot) * 10;
+  } else if (a.type === 'supplyRequest') {
+    const r = s.marketOffers.requests.find((r) => r.id === a.requestId)!;
+    outgoing[r.good] = a.quantity;
+    cash = transportQuote(a.quantity, a.transport ?? 'self').fee;
+  } else if (a.type === 'deliverOrder') {
+    const order = s.commerce.orders.find((o) => o.id === a.orderId)!;
+    Object.assign(outgoing, order.goods);
+    cash = transportQuote(
+      Object.values(outgoing).reduce((n, q) => n + q!, 0),
+      a.transport ?? 'self',
+    ).fee;
+  } else return;
+  if (s.cash < cash) throw Error('现金不足以预留本次货款与运费');
+  s.cash -= cash;
+  const held: NonNullable<GameState['pendingTrade']> = {
+    cash,
+    batches: [],
+    hens: [],
+    units,
+  };
+  for (const [key, q] of Object.entries(outgoing)) {
+    const good = key as Good;
+    if (good === 'hen') {
+      held.hens.push(...s.hens.splice(0, q));
+      continue;
+    }
+    let left = Math.round(q! * 10);
+    const stock = s.batches
+      .filter((b) => b.good === good)
+      .sort(
+        (a, b) =>
+          (a.remainingMinutes ?? Infinity) - (b.remainingMinutes ?? Infinity) ||
+          a.id - b.id,
+      );
+    for (const b of stock) {
+      if (!left) break;
+      const take = Math.min(left, b.units);
+      const cost =
+        take === b.units ? b.cost : Math.floor((b.cost * take) / b.units);
+      held.batches.push({
+        ...b,
+        id: take === b.units ? b.id : s.nextId++,
+        units: take,
+        cost,
+      });
+      b.units -= take;
+      b.cost -= cost;
+      left -= take;
+      held.units += take;
+    }
+    if (left) throw Error('交货库存不足');
+  }
+  s.batches = s.batches.filter((b) => b.units > 0);
+  s.pendingTrade = held;
+}
+
+function releaseTrade(s: GameState) {
+  const held = s.pendingTrade;
+  if (!held) return;
+  s.cash += held.cash;
+  for (const b of held.batches) {
+    if (b.remainingMinutes != null && b.remainingMinutes <= 0) {
+      s.ledger.losses += b.cost;
+      log(s, '运输途中货物腐坏。');
+    } else s.batches.push(b);
+  }
+  s.hens.push(...held.hens);
+  delete s.pendingTrade;
+}
+
 export function dispatch(
+  state: GameState,
+  action: Action,
+  expectedRevision = state.revision,
+): { state: GameState; error?: string; result?: OperationResult } {
+  try {
+    if (expectedRevision !== state.revision)
+      throw Error('操作已更新，请勿重复提交');
+    if (state.phase === 'ended') throw Error('本局已经结束');
+    const timing = actionTiming(state, action);
+    if (
+      !Number.isSafeInteger(timing.minutes) ||
+      timing.minutes < 0 ||
+      timing.minutes > 1440
+    )
+      throw Error('单次行动时间须在0至1440分钟内');
+    if (!canFinishAtVenue(state.clock.minute, timing.minutes, timing.venue))
+      throw Error('当前营业时间不足以完成此行动，请查看下次营业时间');
+    if (action.type === 'sleep') {
+      if (action.minutes < 60 || action.minutes > 600)
+        throw Error('睡眠时长须为1至10小时');
+      if (!['inn', 'temple', 'street', state.housing.id].includes(action.bed))
+        throw Error('只能使用当前住所或临时住宿');
+      if (action.bed === 'inn' && state.cash < 30)
+        throw Error('客栈住宿需要30文');
+    }
+    if (action.type === 'deliverOrder') {
+      const o = state.commerce.orders.find((o) => o.id === action.orderId);
+      if (o && state.clock.minute + timing.minutes > o.deadlineAt)
+        throw Error('无法在订单截止前完成交货');
+    }
+    if (
+      action.type === 'trade' ||
+      action.type === 'deliverOrder' ||
+      action.type === 'buyLot' ||
+      action.type === 'supplyRequest'
+    ) {
+      if (action.transport === 'cart' && !state.home.cart)
+        throw Error('请先购买手推车');
+      if (
+        action.transport === 'porter' &&
+        !canFinishAtVenue(state.clock.minute, timing.minutes, 'porter')
+      )
+        throw Error('脚夫仅在08:00—18:00接活，需在收工前完成');
+    }
+    const check = applyAction(state, action, expectedRevision);
+    if (check.error) throw Error(check.error);
+    const s = structuredClone(state);
+    if (action.type === 'sleep' && action.bed === 'inn') {
+      money(s, -30, '客栈住宿');
+      s.ledger.living += 30;
+    }
+    const energy = actionEnergy(state, action);
+    const projection = projectTime(
+      state.clock,
+      timing.minutes,
+      action.type === 'sleep' ? { sleeping: true } : {},
+    );
+    const extraEnergy = energy * (projection.averageExertion - 1);
+    if (state.stamina < energy + extraEnergy)
+      throw Error(`考虑困倦后需要${Math.ceil(energy + extraEnergy)}体力`);
+    reserveTrade(s, action);
+    advanceGameTime(
+      s,
+      timing.minutes,
+      action.type === 'sleep',
+      action.type === 'sleep' ? action.bed : undefined,
+    );
+    releaseTrade(s);
+    if (s.phase === 'ended') {
+      for (const o of s.commerce.orders) failOrder(s, o);
+      s.revision++;
+      return { state: s, result: operationResult(state, s, action) };
+    }
+    // Quote is locked at dispatch; ordinary daily prices remain the new day's prices.
+    const actualPrices = s.prices;
+    if (action.type === 'trade') s.prices = structuredClone(state.prices);
+    const applied = applyAction(s, action, s.revision);
+    if (applied.error) throw Error(applied.error);
+    const next = applied.state;
+    next.prices = actualPrices;
+    next.stamina = Math.max(0, next.stamina - extraEnergy);
+    next.life.fed = next.life.fed.filter((id) =>
+      next.hens.some((h) => h.id === id),
+    );
+    expireTimedOrders(next);
+    if (
+      (action.type === 'trade' && action.side === 'sell') ||
+      action.type === 'supplyRequest' ||
+      action.type === 'deliverOrder'
+    ) {
+      if (tradeNet(next) > tradeNet(state))
+        next.marketOffers.milestones.firstProfit ??= next.clock.minute;
+      if (action.transport === 'porter')
+        next.marketOffers.milestones.porter ??= next.clock.minute;
+    }
+    updateTradeMilestones(next);
+    const lifeEvents: Partial<Record<keyof typeof HOME_EVENTS, boolean>> = {
+      moveRoom: action.type === 'rentHousing' && action.housing === 'room',
+      buyYard: action.type === 'buyHousing' && action.housing === 'yard',
+      firstHost: action.type === 'host',
+      cartTrade:
+        (action.type === 'trade' ||
+          action.type === 'buyLot' ||
+          action.type === 'supplyRequest' ||
+          action.type === 'deliverOrder') &&
+        action.transport === 'cart',
+      porterDelivery:
+        (action.type === 'deliverOrder' ||
+          action.type === 'supplyRequest' ||
+          (action.type === 'trade' && action.side === 'sell')) &&
+        action.transport === 'porter',
+      nightTrade:
+        action.type === 'buyLot' && timeOfDay(state.clock.minute) >= 1080,
+    };
+    for (const id of Object.keys(lifeEvents) as (keyof typeof HOME_EVENTS)[]) {
+      if (lifeEvents[id] && next.home.events[id] === undefined) {
+        next.home.events[id] = next.clock.minute;
+        log(next, HOME_EVENTS[id]);
+      }
+    }
+    if (action.type === 'sleep')
+      next.life.wakeSummary = {
+        at: next.clock.minute,
+        lines: [
+          `睡眠${action.minutes / 60}小时，体力${next.stamina.toFixed(1)}，睡眠不足${next.clock.sleepDebt.toFixed(1)}小时。`,
+          `睡眠期间现金变化${next.cash - state.cash}文，健康变化${(next.health - state.health).toFixed(1)}。`,
+          ...next.logs
+            .filter((l) => l.id >= state.nextId)
+            .map((l) => `${l.text}${l.items ? ' ' + l.items : ''}`)
+            .slice(-12),
+        ],
+      };
+    const result = operationResult(state, next, action);
+    if (isOperatingAction(action))
+      next.operationHistory = [...state.operationHistory, result].slice(-50);
+    return { state: next, result };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : '操作失败';
+    return {
+      state,
+      error,
+      result: operationResult(state, state, action, error),
+    };
+  }
+}
+
+function applyAction(
   state: GameState,
   action: Action,
   expectedRevision = state.revision,
@@ -1302,6 +1788,226 @@ export function dispatch(
   const s = structuredClone(state);
   try {
     switch (action.type) {
+      case 'reserveRequest': {
+        const r = s.marketOffers.requests.find(
+          (r) => r.id === action.requestId,
+        );
+        if (!r || r.remaining <= 0 || s.clock.minute > r.deadline)
+          throw Error('收购需求已失效');
+        if (s.commerce.relations[r.customer] < 6)
+          throw Error('客户关系达到6才可预留');
+        if (
+          s.marketOffers.requests.some(
+            (r) => r.reservedUntil != null && r.reservedUntil > s.clock.minute,
+          )
+        )
+          throw Error('同时只能预留一条需求');
+        r.reservedUntil = (Math.floor(s.clock.minute / 1440) + 1) * 1440 + 720;
+        r.deadline = r.reservedUntil;
+        s.story = '这份收购需求已为你保留至次日12:00，到期释放，不收罚金。';
+        break;
+      }
+      case 'supplyRequest': {
+        const r = s.marketOffers.requests.find(
+          (r) => r.id === action.requestId,
+        );
+        if (!r || s.clock.minute < r.opensAt || s.clock.minute > r.deadline)
+          throw Error('不在收购时限内');
+        if (
+          !Number.isSafeInteger(action.quantity) ||
+          action.quantity < 1 ||
+          action.quantity > r.remaining
+        )
+          throw Error('交货数量超过剩余需求');
+        const freight = transportQuote(
+          action.quantity,
+          action.transport ?? 'self',
+        ).fee;
+        if (s.stamina < actionEnergy(s, action)) throw Error('交货体力不足');
+        money(s, -freight, '收购交货运费');
+        const taken = consume(s, r.good, action.quantity * 10);
+        const revenue = r.price * action.quantity;
+        money(s, revenue, '限量收购交货');
+        const productionRevenue = Math.floor(
+          (revenue * taken.production) / (action.quantity * 10),
+        );
+        s.ledger.productionRevenue += productionRevenue;
+        s.ledger.productionCost += taken.productionCost;
+        s.ledger.tradeRevenue += revenue - productionRevenue;
+        s.ledger.tradeCost += taken.cost - taken.productionCost + freight;
+        s.stats.productionCostSold += taken.productionCost;
+        s.stats.profit +=
+          revenue -
+          productionRevenue -
+          (taken.cost - taken.productionCost) -
+          freight;
+        s.stamina -= actionEnergy(s, action);
+        r.remaining -= action.quantity;
+        s.commerce.customers[r.customer] ??= {
+          met: true,
+          visited: 0,
+          lastOutcome: null,
+        };
+        s.story = `已交付${GOODS[r.good].name}${action.quantity}${GOODS[r.good].unit}，需求还剩${r.remaining}。`;
+        break;
+      }
+      case 'buyLot': {
+        const lot = s.marketOffers.lots.find((l) => l.id === action.lotId);
+        if (
+          !lot ||
+          lot.bought ||
+          s.clock.minute < lot.opensAt ||
+          s.clock.minute > lot.closesAt
+        )
+          throw Error('货盘已成交或不在营业时间');
+        if (
+          lot.large &&
+          !Object.values(s.commerce.relations).some((r) => r >= 10)
+        )
+          throw Error('大宗货盘需要熟客关系10');
+        const weight = lotWeight(lot);
+        const freight = transportQuote(weight, action.transport ?? 'self').fee;
+        if (reserved(s) + weight * 10 > capacity(s))
+          throw Error('仓储容量不足');
+        if (s.stamina < actionEnergy(s, action)) throw Error('搬运体力不足');
+        const total = lot.price + freight;
+        money(s, -total, '整批货盘采购');
+        s.ledger.purchases += total;
+        const goods = Object.entries(lot.goods) as [Good, number][];
+        let allocated = 0;
+        const basis = goods.reduce((n, [g, q]) => n + s.prices[g].buy * q, 0);
+        goods.forEach(([g, q], i) => {
+          const cost =
+            i === goods.length - 1
+              ? total - allocated
+              : Math.floor((total * s.prices[g].buy * q) / basis);
+          allocated += cost;
+          add(s, g, q * 10, cost, 'buy');
+          const batch = s.batches.at(-1)!;
+          if (batch.remainingMinutes != null)
+            batch.remainingMinutes = Math.min(
+              batch.remainingMinutes,
+              lot.shelfMinutes,
+            );
+        });
+        s.stamina -= actionEnergy(s, action);
+        lot.bought = true;
+        s.marketOffers.milestones.cargo ??= s.clock.minute;
+        s.story = '整批货盘已入库，运费已经计入各批货物成本。';
+        break;
+      }
+      case 'host': {
+        if (!CUSTOMER_IDS.includes(action.customer))
+          throw Error('找不到这位客人');
+        if (!hasFacility(s, 'reception')) throw Error('请先布置会客间');
+        if (!s.commerce.customers[action.customer]?.met)
+          throw Error('请先结识这位客户');
+        const prior = s.home.visits[action.customer];
+        if (prior && prior.count >= 2)
+          throw Error('这位熟客的居家故事已读完，可免费回看');
+        if (prior && s.clock.minute < prior.at + 4320)
+          throw Error('同一客户每三日可邀请一次');
+        money(s, -20, '熟客家宴');
+        s.ledger.social += 20;
+        if (s.life.ateCycle !== lifeCycle(s.clock.minute))
+          s.health = Math.min(100, s.health + 2);
+        s.life.ateCycle = lifeCycle(s.clock.minute);
+        const count = prior?.count ?? 0;
+        s.story = HOME_STORIES[action.customer][count];
+        s.home.visits[action.customer] = {
+          count: count + 1,
+          at: s.clock.minute,
+        };
+        s.commerce.relations[action.customer] = Math.min(
+          10,
+          s.commerce.relations[action.customer] + 1,
+        );
+        log(s, s.story);
+        break;
+      }
+      case 'buyCart':
+        if (s.home.cart) throw Error('已有手推车');
+        money(s, -300, '购买手推车');
+        s.ledger.equipment += 300;
+        s.home.cart = true;
+        s.story = '手推车备好了，买卖货物时可以选择推车搬运。';
+        break;
+      case 'installFacility':
+      case 'removeFacility':
+      case 'sellFacility': {
+        if (!Object.hasOwn(FACILITIES, action.facility))
+          throw Error('未知住宅设施');
+        const spec = FACILITIES[action.facility];
+        const item = s.home.facilities.find((f) => f.kind === action.facility);
+        if (action.type === 'installFacility') {
+          if (s.housing.id === 'street' || s.housing.maintenanceSuspended)
+            throw Error('需要维护正常的固定住所');
+          if (item?.installed) throw Error('设施已安装');
+          if (usedHomeSlots(s) >= HOUSING[s.housing.id].slots)
+            throw Error('住宅功能位不足');
+          if (!item) {
+            money(s, -spec.cost, `购置${spec.name}`);
+            s.ledger.equipment += spec.cost;
+            s.home.facilities.push({ kind: action.facility, installed: true });
+          } else item.installed = true;
+        } else {
+          if (!item) throw Error('尚未拥有该设施');
+          if (action.type === 'removeFacility') {
+            if (!item.installed) throw Error('设施已经封存');
+            item.installed = false;
+          } else {
+            money(s, Math.floor(spec.cost * 0.6), `出售${spec.name}`);
+            s.ledger.returns += Math.floor(spec.cost * 0.6);
+            s.home.facilities = s.home.facilities.filter((f) => f !== item);
+          }
+        }
+        s.story = `${spec.name}已${action.type === 'installFacility' ? '安装' : action.type === 'removeFacility' ? '封存' : '出售'}。`;
+        break;
+      }
+      case 'coldPriority':
+        if (
+          !Array.isArray(action.goods) ||
+          action.goods.some((g) => !GOOD_IDS.includes(g)) ||
+          new Set(action.goods).size !== action.goods.length
+        )
+          throw Error('保鲜顺序包含无效或重复商品');
+        s.home.coldPriority = [...action.goods];
+        s.story = '凉储间保鲜优先顺序已更新。';
+        break;
+      case 'wait':
+      case 'sleep':
+        if (s.event) throw Error('请先处理眼前的遭遇');
+        s.story =
+          action.type === 'sleep'
+            ? '你醒来，重新安排眼前的生活。'
+            : '时光流逝，城里的生意继续变化。';
+        break;
+      case 'autoFeed':
+        s.life.autoFeed = action.enabled;
+        s.story = action.enabled
+          ? '每日05:30将用现有粮食自动喂养。'
+          : '已关闭自动喂养。';
+        break;
+      case 'feed':
+        feedHens(s, action.count);
+        break;
+      case 'eat': {
+        const costs = { bread: 10, egg: 20, saltedEgg: 10, grain: 10 };
+        let cost = 0;
+        if (action.meal === 'diner') {
+          money(s, -18, '食肆主餐');
+          cost = 18;
+        } else {
+          if (!(action.meal in costs)) throw Error('请选择有效的饭食');
+          cost = consume(s, action.meal, costs[action.meal]).cost;
+        }
+        s.ledger.living += cost;
+        if (s.life.ateCycle !== lifeCycle(s.clock.minute))
+          s.health = Math.min(100, s.health + 2);
+        s.life.ateCycle = lifeCycle(s.clock.minute);
+        s.story = '用过主餐，本生活周期的饮食已满足。';
+        break;
+      }
       case 'acceptOrder': {
         requireDay(s);
         const order = s.commerce.orders.find((o) => o.id === action.orderId);
@@ -1326,7 +2032,7 @@ export function dispatch(
           lastOutcome: null,
         };
         s.commerce.customers[order.customer]!.met = true;
-        s.story = `已接「${order.title}」，第${order.deadline}日白天前交齐；${order.deposit ? '保证金' + order.deposit + '文已冻结' : '无保证金'}。`;
+        s.story = `已接「${order.title}」，${formatMoment(order.deadlineAt)}前交齐；${order.deposit ? '保证金' + order.deposit + '文已冻结' : '无保证金'}。`;
         log(s, s.story);
         break;
       }
@@ -1351,7 +2057,8 @@ export function dispatch(
         const order = s.commerce.orders.find((o) => o.id === action.orderId);
         if (!order || order.status !== 'accepted')
           throw Error('没有这张进行中的订单');
-        if (action.type === 'deliverOrder') deliverOrder(s, order);
+        if (action.type === 'deliverOrder')
+          deliverOrder(s, order, action.transport ?? 'self');
         else {
           failOrder(s, order);
           s.story = CUSTOMERS[order.customer].failure;
@@ -1411,16 +2118,17 @@ export function dispatch(
       }
       case 'tea': {
         requireDay(s);
-        if (s.teaDay === s.day) throw Error('今天已经听过消息');
+        if (s.teaDay === clockDay(s.life.lastDawn))
+          throw Error('今天已经听过消息');
         if (s.cash < 8) throw Error('茶钱不足');
         money(s, -8, '茶馆听消息');
         s.ledger.living += 8;
-        s.teaDay = s.day;
+        s.teaDay = clockDay(s.life.lastDawn);
         const candidates: typeof INFO_TEMPLATES = [];
         const eligible = INFO_TEMPLATES.filter(
           (t) =>
-            s.day - (s.intelSeen[t.semantic] ?? -99) >= 20 &&
-            s.day - (s.intelSeen[`skeleton:${t.skeleton}`] ?? -99) >= 7,
+            (s.intelSeen[t.semantic] ?? 0) <= s.clock.minute &&
+            (s.intelSeen[`skeleton:${t.skeleton}`] ?? 0) <= s.clock.minute,
         )
           .map((t) => ({
             t,
@@ -1437,6 +2145,7 @@ export function dispatch(
             !candidates.some((c) => c.skeleton === t.skeleton)
           )
             candidates.push(t);
+        if (!candidates.length) throw Error('暂时没有新消息，过些时候再来');
         let heardMarket = false;
         for (const t of candidates) {
           const w = heardMarket
@@ -1446,11 +2155,11 @@ export function dispatch(
                   !x.heard &&
                   x.expected >= s.day &&
                   x.expected <= s.day + 14 &&
-                  s.day - (s.intelSeen[`market:${x.family}`] ?? -99) >= 7,
+                  (s.intelSeen[`market:${x.family}`] ?? 0) <= s.clock.minute,
               );
           if (w) {
             heardMarket = true;
-            s.intelSeen[`market:${w.family}`] = s.day;
+            s.intelSeen[`market:${w.family}`] = s.clock.minute + 7 * 1440;
           }
           addIntel(s, t, w);
           const customer =
@@ -1467,7 +2176,7 @@ export function dispatch(
             entry.semantic = `customer-intro:${customer}`;
             entry.text = CUSTOMERS[customer].stories[0];
             entry.status = 'new';
-            s.intelSeen[entry.semantic] = s.day;
+            s.intelSeen[entry.semantic] = s.clock.minute + 20 * 1440;
           }
         }
         s.story = `你在茶馆坐了一会儿，记下${candidates.length}条新情报。出处和细节各有分量，真假要等后续动静验证。`;
@@ -1563,8 +2272,7 @@ export function dispatch(
       case 'short':
       case 'heavy': {
         requireDay(s);
-        if (s.daily.work >= RULES.maxWorkPerDay)
-          throw Error('今日已做满两次短工或重活');
+
         const heavy = action.type === 'heavy';
         const cost = actionEnergy(s, action);
         if (heavy && s.health < 40) throw Error('健康低于40，不能做重活');
@@ -1583,21 +2291,21 @@ export function dispatch(
       }
       case 'rest':
         requireDay(s);
-        if (s.daily.rest) throw Error('今天已经休息过');
+
         s.daily.rest = 1;
         s.stamina = Math.min(staminaMax(s), s.stamina + RULES.restStamina);
-        delete s.buffs.tired;
-        s.story =
-          '你坐下歇脚，恢复25体力。今天还可以做别的事，但不能靠休息无限劳动。';
+
+        s.story = '你歇脚一小时，恢复20体力；睡眠不足仍需睡觉缓解。';
         finishAction(s, false);
         break;
       case 'snack':
         requireDay(s);
-        if (s.daily.snack) throw Error('今天已经加餐过');
+        if (s.daily.snack >= 2)
+          throw Error('到下次清晨06:00前，两次有效加餐已用完');
         if (s.cash < 6) throw Error('加餐需要6文');
         money(s, -6, '加餐');
         s.ledger.living += 6;
-        s.daily.snack = 1;
+        s.daily.snack++;
         s.stamina = Math.min(staminaMax(s), s.stamina + RULES.snackStamina);
         s.story = '你买了一份热汤，恢复15体力。';
         finishAction(s, false);
@@ -1653,10 +2361,7 @@ export function dispatch(
         requireDay(s);
         const kind = action.equipment;
         if (!EQUIPMENT_IDS.includes(kind)) throw Error('无效设备');
-        if (
-          HOUSING[s.housing.id].slots <=
-          s.equipment.filter((e) => e.installed).length
-        )
+        if (HOUSING[s.housing.id].slots <= usedHomeSlots(s))
           throw Error('当前住所没有空设备位');
         if (s.equipment.some((e) => e.kind === kind && e.installed))
           throw Error('设备已经安装');
@@ -1712,7 +2417,8 @@ export function dispatch(
             s.batches
               .filter(
                 (b) =>
-                  b.good === g && (b.expires === null || b.expires >= s.day),
+                  b.good === g &&
+                  (b.remainingMinutes == null || b.remainingMinutes > 0),
               )
               .reduce((v, b) => v + b.units, 0) < need
           )
@@ -1734,7 +2440,7 @@ export function dispatch(
           quantity: n,
           equipmentId: eq.id,
           startDay: s.day,
-          readyDay: s.day + r.duration,
+          remainingMinutes: r.duration * 1440,
           inputCost,
           outputUnits,
           status: r.duration ? 'queued' : 'ready',
@@ -1743,7 +2449,7 @@ export function dispatch(
         if (r.duration) eq.jobId = job.id;
         else add(s, r.output, outputUnits, inputCost, 'production', s.day);
         s.story = r.duration
-          ? `${r.name}已开工，${r.duration}夜后完成。原料和成品仓位都已锁定。`
+          ? `${r.name}已开工，${r.duration * 24}小时后完成。原料和成品仓位都已锁定。`
           : `${r.name}完成，产出${GOODS[r.output].name} ×${outputUnits / 10}。`;
         break;
       }
@@ -1777,7 +2483,7 @@ export function dispatch(
         if (action.housing === s.housing.id) throw Error('已经住在这里');
         if (old.kind === 'owned') throw Error('请先出售现有产权，避免丢失房产');
         if (
-          h.slots < s.equipment.filter((e) => e.installed).length ||
+          h.slots < usedHomeSlots(s) ||
           h.capacity < reserved(s) ||
           s.hens.length > h.henCapacity
         )
@@ -1842,40 +2548,24 @@ export function dispatch(
           maintenanceSuspended: false,
         };
         for (const eq of s.equipment) eq.installed = false;
+        for (const facility of s.home.facilities) facility.installed = false;
         s.story =
           '已经退租。设备封存、在制品暂停；货物保留，超出容量时只能先卖货。';
         break;
       case 'maintain': {
         requireDay(s);
         if (!s.housing.maintenanceSuspended) throw Error('住宅维护正常');
-        const cost = HOUSING[s.housing.id].upkeep;
+        const cost =
+          s.housing.paidThrough === s.life.lastDawn
+            ? 0
+            : HOUSING[s.housing.id].upkeep;
         money(s, -cost, '补缴住宅维护');
+        s.housing.paidThrough = s.life.lastDawn;
         s.ledger.housing += cost;
         s.housing.maintenanceSuspended = false;
         s.story = '住宅维护恢复，可以重新开工。';
         break;
       }
-      case 'endDay':
-        requireDay(s);
-        s.phase = 'night';
-        s.story = '天色渐暗。请统一安排晚饭、住宿和喂鸡，夜间会一次结算。';
-        break;
-      case 'night':
-        if (action.feedAll && action.feed !== s.hens.length)
-          throw Error('喂全部时数量须与当前母鸡总数一致');
-        settleNight(s, action);
-        s.nightPreference = {
-          meal: action.meal,
-          bed: action.bed,
-          feed: action.feed,
-          feedMode: action.feedAll ? 'all' : 'fixed',
-        };
-        break;
-      case 'returnDay':
-        if (s.phase !== 'night' || s.event) throw Error('当前不在夜间安排');
-        s.phase = 'day';
-        s.story = '夜尚未深，你决定先处理手头的经营。';
-        break;
       case 'inspect': {
         if (!s.event) throw Error('没有待查问的遭遇');
         if (s.event.inspected) throw Error('已经查问过');
@@ -1890,7 +2580,7 @@ export function dispatch(
         if (!e || e.id !== action.eventId) throw Error('这个遭遇已经处理');
         const c = e.choices.find((x) => x.id === action.id);
         if (!c) throw Error('无效选择');
-        const staminaCost = (c.cost.stamina ?? 0) + (c.cost.ap ?? 0) * 10;
+        const staminaCost = c.cost.stamina ?? 0;
         if (s.cash < (c.cost.cash ?? 0) || s.stamina < staminaCost)
           throw Error('资源不足，请选择其他行动');
         if (c.cost.cash) money(s, -c.cost.cash, c.label);
@@ -1932,15 +2622,6 @@ export function dispatch(
         break;
       default:
         throw Error('未知操作');
-    }
-    if (
-      actionEnergy(state, action) > 0 &&
-      state.stamina >= 10 &&
-      state.stamina - actionEnergy(state, action) < 10
-    ) {
-      s.health -= 2;
-      s.buffs.tired = s.day + 1;
-      log(s, '体力低于10，健康−2，进入劳累。');
     }
     s.jobs = s.jobs
       .filter((j) => j.status === 'queued')
@@ -2006,11 +2687,15 @@ export function achievements(s: GameState) {
 export function readSave(raw: string): GameState {
   try {
     const s = JSON.parse(raw) as GameState;
-    if (s.saveRevision !== undefined && ![1, 2].includes(s.saveRevision))
+    if (
+      s.saveRevision !== 3 ||
+      s.version !== 3 ||
+      !validClock(s.clock) ||
+      !validContinuousSave(s)
+    )
       throw Error();
-    s.saveRevision = 2;
+    s.saveRevision = 3;
     s.operationHistory ??= [];
-    s.nightPreference ??= null;
     if (!Array.isArray(s.operationHistory)) throw Error();
     s.operationHistory = s.operationHistory.slice(-50);
     for (const result of s.operationHistory) {
@@ -2024,6 +2709,12 @@ export function readSave(raw: string): GameState {
             result.depositLoss < 0)) ||
         !Number.isSafeInteger(result.id) ||
         !Number.isSafeInteger(result.day) ||
+        !Number.isSafeInteger(result.startedAt) ||
+        !Number.isSafeInteger(result.finishedAt) ||
+        result.startedAt < 480 ||
+        result.finishedAt < result.startedAt ||
+        result.finishedAt > s.clock.minute ||
+        result.day !== clockDay(result.startedAt) ||
         (result.error !== undefined && typeof result.error !== 'string') ||
         (result.workRemaining !== null &&
           !Number.isSafeInteger(result.workRemaining)) ||
@@ -2039,6 +2730,11 @@ export function readSave(raw: string): GameState {
                 !c ||
                 !CUSTOMER_IDS.includes(c.id) ||
                 !Number.isFinite(c.change),
+            ))) ||
+        (result.tradeMilestones !== undefined &&
+          (!Array.isArray(result.tradeMilestones) ||
+            result.tradeMilestones.some(
+              (id) => !Object.hasOwn(TRADE_REWARDS, id),
             ))) ||
         (result.milestones !== undefined &&
           (!Array.isArray(result.milestones) ||
@@ -2063,46 +2759,15 @@ export function readSave(raw: string): GameState {
         ) ||
         !Array.isArray(result.jobs) ||
         result.jobs.some(
-          (j) => !RECIPE_MAP[j.recipeId] || !Number.isSafeInteger(j.readyDay),
+          (j) =>
+            !RECIPE_MAP[j.recipeId] ||
+            (j.readyAt !== null &&
+              (!Number.isSafeInteger(j.readyAt) || j.readyAt < 0)),
         ) ||
         !Array.isArray(result.details) ||
         result.details.some((d) => typeof d !== 'string')
       )
         throw Error();
-    }
-    if (
-      s.nightPreference &&
-      (!['bread', 'egg', 'saltedEgg', 'grain', 'diner', 'none'].includes(
-        s.nightPreference.meal,
-      ) ||
-        ![
-          'inn',
-          'temple',
-          'street',
-          'room',
-          'courtyard',
-          'yard',
-          'mansion',
-        ].includes(s.nightPreference.bed) ||
-        !['all', 'fixed'].includes(s.nightPreference.feedMode) ||
-        !Number.isSafeInteger(s.nightPreference.feed) ||
-        s.nightPreference.feed < 0)
-    )
-      throw Error();
-    if (
-      s.version === 2 &&
-      s.rules === RULES.version &&
-      s.ledger &&
-      !('purchases' in s.ledger)
-    ) {
-      // Old totals double-counted costs and cannot be reconstructed from bounded logs.
-      s.ledger = { ...emptyLedger(), sinceDay: s.day };
-      if (s.housing) s.housing.maintenanceSuspended ??= false;
-      s.intel = s.intel.filter((i) =>
-        INFO_TEMPLATES.some((t) => t.id === i.templateId),
-      );
-      s.story =
-        '旧局已保留，修正后的分类账从本日重新记账；历史资产和进度不变。';
     }
     s.ledger.depositsPaid ??= 0;
     s.ledger.depositsReturned ??= 0;
@@ -2111,9 +2776,6 @@ export function readSave(raw: string): GameState {
       s.commerce = newCommerce(s);
       updateMilestones(s);
     }
-    s.intel = s.intel.filter(
-      (i) => i.reportVersion === 2 || i.worldId !== undefined,
-    );
     const model = newGame(0);
     model.buffs = {};
     const shape = (v: unknown, t: unknown): boolean => {
@@ -2141,7 +2803,7 @@ export function readSave(raw: string): GameState {
     if (
       !shape(s, model) ||
       !validCommerce(s) ||
-      s.version !== 2 ||
+      s.version !== 3 ||
       s.rules !== RULES.version ||
       ![3000, 30000].includes(s.target) ||
       !Number.isSafeInteger(s.cash) ||
@@ -2153,7 +2815,7 @@ export function readSave(raw: string): GameState {
       !Number.isInteger(s.rng) ||
       s.rng < 0 ||
       s.rng > 4294967295 ||
-      !['day', 'market', 'night', 'ended'].includes(s.phase)
+      !['day', 'ended'].includes(s.phase)
     )
       throw Error();
     if (
@@ -2177,7 +2839,6 @@ export function readSave(raw: string): GameState {
       )
     )
       throw Error();
-    if (s.phase === 'market') s.phase = 'day';
     return s;
   } catch {
     throw Error('存档损坏或版本不兼容，原存档未被覆盖。');

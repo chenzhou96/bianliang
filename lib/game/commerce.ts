@@ -1,4 +1,4 @@
-import { HOUSING, RECIPES } from './config.ts';
+import { HOUSING } from './config.ts';
 import type { CommerceState, CustomerId, GameState, Good } from './types.ts';
 
 export const CUSTOMER_IDS: CustomerId[] = [
@@ -10,8 +10,8 @@ export const CUSTOMER_IDS: CustomerId[] = [
   'ferryman',
 ];
 export const ORDER_RULES = {
-  normalMarkup: 1.3,
-  highRiskMarkup: 1.35,
+  normalMarkup: 1.25,
+  highRiskMarkup: 1.3,
   depositRate: 0.2,
   sizes: [1, 3, 8],
 } as const;
@@ -31,7 +31,7 @@ export const CUSTOMERS: Record<
   {
     name: string;
     industry: string;
-    stories: [string, string, string];
+    stories: [string, string, string, string];
     failure: string;
   }
 > = {
@@ -42,6 +42,7 @@ export const CUSTOMERS: Record<
       '孙娘把一块干净笼布叠在柜边：“隔壁义塾添了学生，午间的饼不够分。我想找个能按时送货的人，孩子们等不得。”',
       '孙娘核清你按单送来的货，随即招呼伙计开灶，又把义塾的名单递来：“今日一个没落下。以后有这份活，我会先问你。”',
       '收铺时，孙娘留了一碗面汤。她说当年也是靠一笼饼在汴梁站稳脚跟，随后将大户的宴席供货单放到你面前：“这回，你来掌勺。”',
+      '义塾散学时，孙娘请孩子们把新写的字贴在铺门上。她把你的名字也添进供货人的名册：“以后有大批备饭，我提前来商量。忙不过来就直说，熟人更要互相留余地。”',
     ],
     failure:
       '孙娘提前借了隔壁的灶补货：“孩子的饭不能误。下次先算好时辰，做得出来再应承。”',
@@ -53,6 +54,7 @@ export const CUSTOMERS: Record<
       '杜掌柜沿着尺子理平布边，说城西裁缝要赶制一批春衫。布色可以商量，尺寸和交期却不能少一分。',
       '裁缝核过你送来的用料，清单上的数量一样不少。杜掌柜给你记了一笔信誉：“账上守信，比嘴上说得好听有用。”',
       '布庄换季盘库，杜掌柜请你一同看样。他替你引见做嫁衣的绣娘，愿将用料更贵、交期更紧的整批丝绸托给你。',
+      '杜掌柜邀你见证徒弟第一次独立裁衣。散席时，他拿出积年的布样册，讲明哪些布该趁季节出手、哪些值得慢慢等。此后遇到整批来货，他愿先与你一道验看。',
     ],
     failure:
       '杜掌柜收起那张尺码单：“裁缝已经另找货了。损失依契约结清，以后小单做稳，再谈大单。”',
@@ -64,6 +66,7 @@ export const CUSTOMERS: Record<
       '何叔正擦着一排空酒坛：“下旬有商队包桌，客人爱喝什么尚未问清，酒却得提前备。愿意接活，就看清坛数和日子。”',
       '席间客人又要添酒，何叔从你送来的那批里抱出两坛，才没断了酒兴。散席后，他把约定的货钱一文不少交给你。',
       '何叔领你看酒窖，指着留空的一排木架：“往后这几格给你留。宴席单报酬高，可耽搁一夜，满楼客人都要等。”',
+      '何叔把新酒单递给你，空出一栏让你写意见。他说酒楼也有冷清的时候，往后大席备货提前商量，既给客人留体面，也给供货的人留周转的本钱。',
     ],
     failure:
       '何叔临时向别家借酒，酒楼的席面才接上。他没有多讨钱，只按这单约定结清后果，嘱你别把尚未出缸的酒算作现货。',
@@ -75,6 +78,7 @@ export const CUSTOMERS: Record<
       '陈婆把鸡蛋一枚枚照过光：“食肆每日都要鲜蛋，最怕这一日多、下一日断。你若有余蛋，可以先供一小筐。”',
       '送来的蛋壳完整，陈婆在筐底添了一层稻草：“货备得齐，也懂得送。赶集那天我给你留一处落筐的地方。”',
       '天还没亮，陈婆已经替你留好新筐。她愿把几家食肆的用量合成一张大单，却再三提醒雨天也不能断粮断料。',
+      '陈婆把赶集的凳子挪出半边，请你坐下喝茶。她说如今有人能接住大宗鲜货，自己终于敢少跑一趟远路；遇上急着出手的货，会先把数量和鲜度告诉你。',
     ],
     failure:
       '陈婆拿空筐敲了敲柜沿：“今日食肆另买了蛋。鸡不会照着契约下蛋，留些余量才稳妥。”',
@@ -86,6 +90,7 @@ export const CUSTOMERS: Record<
       '沈九将渡口货单摊开，茶叶和药材各有买主。他不催你应下，只让你先看市价：“同一张单，买在不同日子，盈亏便不同。”',
       '沈九核过封口，赞你没有用欠份的包袱凑数。他告诉你下一趟会收别样货，先前的报价却仍按契约兑现。',
       '商队启程前，沈九给你留了一枚木签：“拿它来，伙计会给你看大宗收购单。别只看报酬，压在路上的本钱也算钱。”',
+      '沈九返城后先到你门前，把货签和家书分成两叠。他邀你一道验下一船整批货，笑说这些年最难得的不是见过好价，而是有人肯把坏消息也及时说清。',
     ],
     failure:
       '沈九已换了收货人，仍把旧契约留给你核对：“行情变了是常事，接了单便要算上退路。”',
@@ -97,6 +102,7 @@ export const CUSTOMERS: Record<
       '周嫂在河边点着船工的饭包。出航要吃食、布料和茶，她宁愿交给一位可靠的人备齐，也不想临开船四处找货。',
       '船工解开你的货包，吃食和用料分得清楚。周嫂将清单折好：“省下这半个时辰，我们就能赶上早潮。”',
       '新来的两艘船也请周嫂代办补给。她想把整队的供货交给你，却把每样货的数量重新念了一遍，确认你都听清了。',
+      '周嫂请你在船工的名册旁写下收货时辰。她说下一趟大宗补给会提前递信，临时改期也一定相告。渡船启程时，有人从船头朝你挥手，喊的是你的名字。',
     ],
     failure:
       '周嫂让船先走了，没收齐的货只能留待下次。她按契约结清损失，没有让一船人的生计无限等下去。',
@@ -492,11 +498,14 @@ export function generateOrders(s: GameState) {
       deposit: highRisk ? Math.ceil(price * 0.2) : 0,
       highRisk,
       postedDay: s.day,
-      deadline:
-        s.day +
-        (highRisk
-          ? 3 + Math.floor(random(c) * 2)
-          : 4 + Math.floor(random(c) * 3)),
+      deadlineAt:
+        (s.day -
+          1 +
+          (highRisk
+            ? 3 + Math.floor(random(c) * 2)
+            : 4 + Math.floor(random(c) * 3))) *
+          1440 +
+        1200,
       status: 'offered',
       settledDay: null,
     });
@@ -504,7 +513,7 @@ export function generateOrders(s: GameState) {
   }
 }
 export function orderTerms(o: GameState['commerce']['orders'][number]) {
-  return `${o.id}:${o.price}:${o.deposit}:${o.deadline}`;
+  return `${o.id}:${o.price}:${o.deposit}:${o.deadlineAt}`;
 }
 export function returnTerms(s: GameState) {
   return s.commerce.orders
@@ -521,11 +530,13 @@ export function customerStage(s: GameState, id: CustomerId) {
   const c = s.commerce.customers[id];
   return !c?.met
     ? 0
-    : s.commerce.relations[id] >= 3
-      ? 3
-      : c.lastOutcome === 'delivered'
-        ? 2
-        : 1;
+    : s.commerce.relations[id] >= 10
+      ? 4
+      : s.commerce.relations[id] >= 3
+        ? 3
+        : c.lastOutcome === 'delivered'
+          ? 2
+          : 1;
 }
 export function milestoneProgress(s: GameState, id: string) {
   if (s.commerce.milestones[id]) return '已达成';
@@ -543,32 +554,6 @@ export function customerOpportunity(s: GameState) {
       !s.intel.some((i) => i.customerId === id),
   );
 }
-export function productionEarliest(s: GameState, good: Good, required = 1) {
-  const recipe = RECIPES.find((r) => r.output === good);
-  if (!recipe) return null;
-  const equipment = s.equipment.find(
-    (e) => e.kind === recipe.equipment && e.installed,
-  );
-  if (
-    !equipment ||
-    s.skills[recipe.industry] < recipe.minSkill ||
-    s.housing.maintenanceSuspended
-  )
-    return null;
-  const busy = s.jobs.find(
-    (j) => j.id === equipment.jobId && j.status === 'queued',
-  );
-  const output =
-    (recipe.outputUnits / 10) * (s.skills[recipe.industry] >= 3 ? 1.2 : 1);
-  const batches = Math.ceil(required / output);
-  const perDay = Math.max(1, Math.min(20, Math.floor(100 / recipe.stamina)));
-  const runs = Math.ceil(batches / perDay);
-  return (
-    Math.max(s.day, busy?.readyDay ?? s.day) +
-    (recipe.duration ? runs * recipe.duration : runs - 1)
-  );
-}
-
 export function validCommerce(s: GameState): boolean {
   const c = s.commerce;
   if (
@@ -612,7 +597,7 @@ export function validCommerce(s: GameState): boolean {
         typeof v.met !== 'boolean' ||
         !Number.isInteger(v.visited) ||
         v.visited < 0 ||
-        v.visited > 3 ||
+        v.visited > CUSTOMERS[id as CustomerId].stories.length ||
         ![null, 'delivered', 'failed'].includes(v.lastOutcome),
     )
   )
@@ -646,8 +631,8 @@ export function validCommerce(s: GameState): boolean {
       typeof o.highRisk !== 'boolean' ||
       o.deposit !== (o.highRisk ? Math.ceil(o.price * 0.2) : 0) ||
       !Number.isSafeInteger(o.postedDay) ||
-      !Number.isSafeInteger(o.deadline) ||
-      o.deadline <= o.postedDay ||
+      !Number.isSafeInteger(o.deadlineAt) ||
+      o.deadlineAt <= o.postedDay * 1440 ||
       ![
         'offered',
         'accepted',

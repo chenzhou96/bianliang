@@ -23,9 +23,13 @@ export const option = (
   cost: EventChoice['cost'],
   outcomes: OutcomeDefinition[],
 ): EventChoice => ({ id, label, hint, cost, outcomes });
-export const decline = option('decline', '告辞离开', '没有额外消耗。', {}, [
-  out(1, '你拱手告辞。汴梁的街市照常喧闹，没人追着你讨一个答案。'),
-]);
+export const decline = option(
+  'decline',
+  '告辞离开',
+  '耗时15分钟，不消耗现金和体力。',
+  {},
+  [out(1, '你拱手告辞。汴梁的街市照常喧闹，没人追着你讨一个答案。')],
+);
 const variant = (
   id: string,
   person: string,
@@ -109,8 +113,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'question',
             '请摊主作证',
-            '消耗1行动点，核对经过。',
-            { ap: 1 },
+            '15分钟、10体力，核对经过。',
+            { stamina: 10 },
             [
               out(1, '摊主说出了自己所见。汉子嘟囔几句，提篮走了。', {
                 reputation: 1,
@@ -133,8 +137,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'sort',
             '帮忙整理',
-            '消耗1行动点；对方只能说尽量答谢。',
-            { ap: 1 },
+            '15分钟、10体力；对方只能说尽量答谢。',
+            { stamina: 10 },
             [
               out(4, '交货及时，阿成分给你30文酬谢。', {
                 cash: 30,
@@ -263,8 +267,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'return',
             '交还钱袋',
-            '消耗1行动点；可能收到答谢。',
-            { ap: 1 },
+            '15分钟、10体力；可能收到答谢。',
+            { stamina: 10 },
             [
               out(6, '老李收好钱袋，连声道谢。', { help: true, reputation: 1 }),
               out(4, '老李坚持取出15文答谢你。', {
@@ -290,8 +294,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'check',
             '找一找周围',
-            '消耗1行动点；不保证找到钱。',
-            { ap: 1 },
+            '15分钟、10体力；不保证找到钱。',
+            { stamina: 10 },
             [
               out(7, '石缝里什么也没有，半日就这样过去。'),
               out(3, '你在排水沟边找到5文散钱。', { cash: 5 }),
@@ -313,8 +317,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'seek',
             '陪他寻找失主',
-            '消耗1行动点；可能无功而返。',
-            { ap: 1 },
+            '15分钟、10体力；可能无功而返。',
+            { stamina: 10 },
             [
               out(5, '你们找到失主，对方赠你25文谢礼。', {
                 cash: 25,
@@ -349,8 +353,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'accept',
             '接下点货活',
-            '1行动、15体力；确定收入75文，可能另有赏钱。',
-            { ap: 1, stamina: 15 },
+            '120分钟、25体力；确定收入75文，可能另有赏钱。',
+            { stamina: 25 },
             [
               out(8, '点货完毕，掌柜照约定支付75文。', { cash: 75 }),
               out(2, '你查出一张重单，掌柜连同赏钱给了90文。', { cash: 90 }),
@@ -372,8 +376,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'accept',
             '试着招揽客人',
-            '1行动、15体力；按成交付费，可能没有收入。',
-            { ap: 1, stamina: 15 },
+            '120分钟、25体力；按成交付费，可能没有收入。',
+            { stamina: 25 },
             [
               out(6, '半日过去没人下单。按原先说法，这次没有佣金。'),
               out(4, '一位客商成交，韩二付给你100文佣金。', { cash: 100 }),
@@ -395,8 +399,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'accept',
             '搬货进棚',
-            '1行动、25体力；收入85文，可能额外劳累。',
-            { ap: 1, stamina: 25 },
+            '240分钟、35体力；收入85文，可能额外劳累。',
+            { stamina: 35 },
             [
               out(6, '货物都搬好了，阿成付85文。你揉了揉酸疼的手臂。', {
                 cash: 85,
@@ -515,13 +519,19 @@ export const EVENTS: EventFamily[] = [
         '店里留着干燥的位置，掌柜没有索钱。',
         '伙计说掌柜常让行人歇脚，只要不碰湿纸货就好。',
         [
-          option('wait', '歇一会再走', '消耗1行动；恢复体力。', { ap: 1 }, [
-            out(7, '雨脚缓了，你恢复20体力。', { stamina: 20 }),
-            out(3, '掌柜递来热水，你恢复25体力。', {
-              stamina: 25,
-              buff: 'warm',
-            }),
-          ]),
+          option(
+            'wait',
+            '歇一会再走',
+            '15分钟、10体力；恢复体力。',
+            { stamina: 10 },
+            [
+              out(7, '雨脚缓了，你恢复20体力。', { stamina: 20 }),
+              out(3, '掌柜递来热水，你恢复25体力。', {
+                stamina: 25,
+                buff: 'warm',
+              }),
+            ],
+          ),
         ],
       ),
       variant(
@@ -538,8 +548,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'wait',
             '在棚下等待',
-            '消耗1行动；体力恢复10，可能染上风寒。',
-            { ap: 1 },
+            '15分钟、10体力；体力恢复10，可能染上风寒。',
+            { stamina: 10 },
             [
               out(6, '你歇过脚恢复10体力，但衣服湿透，染上了风寒。', {
                 stamina: 10,
@@ -593,10 +603,16 @@ export const EVENTS: EventFamily[] = [
         '药铺掌柜在旁协助，没有兜售神药。',
         '掌柜确认沈先生每月来义诊，只做简单调养与休息指导。',
         [
-          option('visit', '排队请教', '消耗1行动；可能恢复健康。', { ap: 1 }, [
-            out(7, '休息调养后，你感觉好些，健康恢复8。', { health: 8 }),
-            out(3, '郎中讲得仔细，你歇过一阵，健康恢复12。', { health: 12 }),
-          ]),
+          option(
+            'visit',
+            '排队请教',
+            '15分钟、10体力；可能恢复健康。',
+            { stamina: 10 },
+            [
+              out(7, '休息调养后，你感觉好些，健康恢复8。', { health: 8 }),
+              out(3, '郎中讲得仔细，你歇过一阵，健康恢复12。', { health: 12 }),
+            ],
+          ),
         ],
       ),
       variant(
@@ -636,8 +652,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'rest',
             '坐一会儿',
-            '消耗1行动；恢复体力，可能略有好转。',
-            { ap: 1 },
+            '15分钟、10体力；恢复体力，可能略有好转。',
+            { stamina: 10 },
             [
               out(7, '你安静坐了一会，恢复20体力。', { stamina: 20 }),
               out(3, '休息让你缓了过来，恢复20体力、3健康。', {
@@ -668,8 +684,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'mediate',
             '帮忙重称',
-            '消耗1行动；可能获得谢礼。',
-            { ap: 1 },
+            '15分钟、10体力；可能获得谢礼。',
+            { stamina: 10 },
             [
               out(7, '误会解开，双方向你道谢。', { reputation: 1, help: true }),
               out(3, '掌柜谢你化解争执，赠你半份粟米。', {
@@ -703,7 +719,7 @@ export const EVENTS: EventFamily[] = [
               out(2, '围观人替你说话，陶贩最后退回10文。', { cash: 10 }),
             ],
           ),
-          option('ask', '请人作证', '消耗1行动。', { ap: 1 }, [
+          option('ask', '请人作证', '15分钟、10体力。', { stamina: 10 }, [
             out(1, '证人说清经过，陶贩收起了碎碗。'),
           ]),
         ],
@@ -722,8 +738,8 @@ export const EVENTS: EventFamily[] = [
           option(
             'count',
             '帮忙清点',
-            '1行动、10体力；可能获得报酬。',
-            { ap: 1, stamina: 10 },
+            '15分钟、20体力；可能获得报酬。',
+            { stamina: 20 },
             [
               out(6, '你核清数量，郑五付给你25文答谢。', {
                 cash: 25,

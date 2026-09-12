@@ -1,3 +1,5 @@
+import { closeDay, setDay } from './helpers.ts';
+import { GOODS } from '../lib/game/config.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -29,7 +31,7 @@ function act(s: GameState, a: Action) {
 }
 function setup(highRisk = false) {
   const s = newGame(91, 30000);
-  s.day = 4;
+  setDay(s, 4);
   s.cash = 5000;
   s.encounterDay = s.day;
   s.phase = 'day';
@@ -45,31 +47,40 @@ function setup(highRisk = false) {
     deposit: highRisk ? 18 : 0,
     highRisk,
     postedDay: 4,
-    deadline: 6,
+    deadlineAt: 5 * 1440 + 1200,
     status: 'offered',
     settledDay: null,
   };
   s.commerce.orders = [order];
   s.commerce.relations.baker = highRisk ? 3 : 0;
   s.batches = [
-    { id: 800, good: 'egg', units: 10, cost: 10, origin: 'buy', expires: 6 },
+    {
+      id: 800,
+      good: 'egg',
+      units: 10,
+      cost: 10,
+      origin: 'buy',
+      remainingMinutes: 2880,
+    },
     {
       id: 801,
       good: 'egg',
+      remainingMinutes: 2880,
       units: 10,
       cost: 5,
       origin: 'production',
-      expires: 6,
     },
     {
       id: 802,
       good: 'flour',
+      remainingMinutes: null,
       units: 10,
       cost: 30,
       origin: 'buy',
-      expires: null,
     },
   ];
+  for (const b of s.batches)
+    b.remainingMinutes = GOODS[b.good].life ? 2880 : null;
   s.nextId = 1000;
   return s;
 }
@@ -107,17 +118,16 @@ void test('high-risk contracts require explicit matching terms and conserve escr
   assert.deepEqual(readSave(JSON.stringify(s)), s);
 });
 
-void test('deadline delivery precedes night expiry and all failures are charged once', () => {
+void test('deadline delivery precedes expiry and failures are charged exactly once', () => {
   let s = setup(true);
   const o = s.commerce.orders[0];
   s = act(s, { type: 'acceptOrder', orderId: o.id, confirm: orderTerms(o) });
-  s.day = 6;
+  setDay(s, 6);
   assert.equal(
     dispatch(s, { type: 'deliverOrder', orderId: o.id }).error,
     undefined,
   );
-  s = act(s, { type: 'endDay' });
-  s = act(s, { type: 'night', meal: 'none', bed: 'street', feed: 0 });
+  s = act(s, { type: 'wait', minutes: 1200 - (s.clock.minute % 1440) });
   assert.equal(s.commerce.orders.find((x) => x.id === 900)?.status, 'failed');
   assert.equal(s.ledger.depositLosses, 18);
   assert.equal(s.commerce.failed, 1);
@@ -132,7 +142,7 @@ void test('insufficient inventory, expired inventory and stamina cannot partiall
   for (const kind of ['missing', 'expired', 'stamina']) {
     const bad = structuredClone(s);
     if (kind === 'missing') bad.batches.pop();
-    if (kind === 'expired') bad.batches[0].expires = 3;
+    if (kind === 'expired') bad.batches[0].remainingMinutes = 0;
     if (kind === 'stamina') bad.stamina = 1;
     const r = dispatch(bad, { type: 'deliverOrder', orderId: 900 });
     assert(r.error);
@@ -160,20 +170,15 @@ void test('return, death and cancellation settle active deposits without debt or
   assert.equal(returned.ledger.depositLosses, 18);
   const dying = structuredClone(s);
   dying.health = 1;
-  dying.phase = 'night';
-  const died = act(dying, {
-    type: 'night',
-    meal: 'none',
-    bed: 'street',
-    feed: 0,
-  });
+  dying.clock.awakeMinutes = 1500;
+  const died = act(dying, { type: 'wait', minutes: 60 });
   assert.equal(died.ending, 'death');
   assert.equal(died.ledger.depositLosses, 18);
 });
 
 void test('offers are deterministic, bounded and do not reroll on reload or read', () => {
   const s = newGame(27);
-  s.day = 4;
+  setDay(s, 4);
   const t = structuredClone(s);
   generateOrders(s);
   generateOrders(t);
@@ -211,21 +216,11 @@ void test('public calendar announces only seven days ahead and milestones do not
   assert(todayTasks(s).some((t) => t.id === 'calendar:30'));
 });
 
-void test('old v2 progresses migrate without assets changing or retroactive offers', () => {
+void test('old v2 progress is rejected without mutating the supplied data', () => {
   const s = setup();
-  const old = JSON.parse(JSON.stringify(s));
-  delete old.commerce;
-  delete old.saveRevision;
-  delete old.ledger.depositsPaid;
-  delete old.ledger.depositsReturned;
-  delete old.ledger.depositLosses;
-  const migrated = readSave(JSON.stringify(old));
-  assert.equal(migrated.cash, s.cash);
-  assert.deepEqual(migrated.batches, s.batches);
-  assert.equal(migrated.commerce.orders.length, 0);
-  assert.equal(migrated.commerce.enabledDay, 5);
-  assert.equal(migrated.commerce.profitSinceDay, 4);
-  assert.deepEqual(migrated.relations, s.relations);
+  const raw = JSON.stringify({ ...s, version: 2, saveRevision: 2 });
+  assert.throws(() => readSave(raw));
+  assert.equal(s.cash, 5000);
 });
 
 void test('all six customers reveal sequential stories, accept a decline and recover from failure', () => {
@@ -253,17 +248,31 @@ void test('all six customers reveal sequential stories, accept a decline and rec
     assert.equal(s.story, CUSTOMERS[id].failure);
     assert.equal(s.commerce.customers[id]!.visited, 3);
     assert(dispatch(s, { type: 'visitCustomer', customerId: id }).error);
+    assert.equal(
+      publicState(s).customers?.find((c) => c.id === id)?.stories.length,
+      3,
+    );
+    s.commerce.relations[id] = 10;
+    s = act(s, { type: 'visitCustomer', customerId: id });
+    assert.equal(s.story, CUSTOMERS[id].stories[3]);
+    assert.equal(s.commerce.customers[id]!.visited, 4);
+    assert.equal(
+      publicState(s).customers?.find((c) => c.id === id)?.stories.length,
+      4,
+    );
+    assert.deepEqual(readSave(JSON.stringify(s)), s);
+    assert(dispatch(s, { type: 'visitCustomer', customerId: id }).error);
   }
 });
 
-void test('a product finishing during the deadline night cannot rescue its contract', () => {
+void test('a product finishing one minute after the deadline cannot rescue its contract', () => {
   let s = setup(true);
   const o = s.commerce.orders[0];
   o.goods = { saltedEgg: 2 };
   o.prices = { saltedEgg: 45 };
   s = act(s, { type: 'acceptOrder', orderId: 900, confirm: orderTerms(o) });
   s.batches = [];
-  s.day = 6;
+  setDay(s, 6);
   s.housing.id = 'room';
   s.equipment = [{ id: 1100, kind: 'pickleVat', installed: true, jobId: 1101 }];
   s.jobs = [
@@ -273,15 +282,15 @@ void test('a product finishing during the deadline night cannot rescue its contr
       quantity: 1,
       equipmentId: 1100,
       startDay: 4,
-      readyDay: 7,
+
       inputCost: 20,
       outputUnits: 20,
+      remainingMinutes: 721,
       status: 'queued',
     },
   ];
   s.nextId = 1200;
-  s = act(s, { type: 'endDay' });
-  s = act(s, { type: 'night', meal: 'diner', bed: 'room', feed: 0 });
+  s = act(s, { type: 'wait', minutes: 1201 - (s.clock.minute % 1440) });
   assert.equal(s.commerce.orders.find((x) => x.id === 900)?.status, 'failed');
   assert.equal(s.ledger.depositLosses, 18);
   assert(dispatch(s, { type: 'deliverOrder', orderId: 900 }).error);
@@ -291,15 +300,21 @@ void test('a product finishing during the deadline night cannot rescue its contr
 void test('generated order sizes remain carryable and escrow validation rejects corruption', () => {
   for (let seed = 1; seed <= 50; seed++) {
     const s = newGame(seed);
-    s.day = 4;
+    setDay(s, 4);
     s.cash = 100000;
     s.skills.food = 3;
     generateOrders(s);
     for (const o of s.commerce.orders) {
       const units = Object.values(o.goods).reduce((n, q) => n + q!, 0);
       assert(units <= 90);
-      assert(o.deadline - o.postedDay >= (o.highRisk ? 3 : 4));
-      assert(o.deadline - o.postedDay <= (o.highRisk ? 4 : 6));
+      assert(
+        Math.floor(o.deadlineAt / 1440) + 1 - o.postedDay >=
+          (o.highRisk ? 3 : 4),
+      );
+      assert(
+        Math.floor(o.deadlineAt / 1440) + 1 - o.postedDay <=
+          (o.highRisk ? 4 : 6),
+      );
     }
   }
   const s = setup(true);
@@ -338,15 +353,20 @@ void test('a thousand commerce days keep escrow, offers, achievements and saves 
           units: q! * 10,
           cost: 1,
           origin: 'buy' as const,
-          expires: null,
+          remainingMinutes: GOODS[good as keyof typeof GOODS].life
+            ? 1440
+            : null,
         }));
-        s = act(s, { type: 'deliverOrder', orderId: offer.id });
+        s = act(s, {
+          type: 'deliverOrder',
+          orderId: offer.id,
+          transport: 'porter',
+        });
       }
     }
     if (s.event)
       s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
-    s = act(s, { type: 'endDay' });
-    s = act(s, { type: 'night', meal: 'diner', bed: 'mansion', feed: 0 });
+    s = closeDay(s, 'mansion');
     assert.equal(s.day, day + 1);
     assert(s.commerce.orders.length <= 35);
     assert(s.operationHistory.length <= 50);
@@ -376,8 +396,7 @@ void test('profit streaks reset on a flat day and unlock only after three consec
     if (s.event)
       s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
     s.ledger.tradeRevenue += profit;
-    s = act(s, { type: 'endDay' });
-    s = act(s, { type: 'night', meal: 'diner', bed: 'inn', feed: 0 });
+    s = closeDay(s, 'inn');
   };
   close(20);
   close(20);
@@ -388,7 +407,35 @@ void test('profit streaks reset on a flat day and unlock only after three consec
   close(10);
   assert.equal(s.commerce.milestones.steady, undefined);
   close(10);
-  assert.equal(s.commerce.milestones.steady, 6);
+  assert.equal(s.commerce.milestones.steady, 7);
   close(10);
-  assert.equal(s.commerce.milestones.steady, 6);
+  assert.equal(s.commerce.milestones.steady, 7);
+});
+
+void test('contracts use their exact absolute deadline, including nonstandard minutes', () => {
+  let s = setup(true);
+  s = act(s, {
+    type: 'acceptOrder',
+    orderId: 900,
+    confirm: orderTerms(s.commerce.orders[0]),
+  });
+  setDay(s, 6, 539);
+  const action = { type: 'deliverOrder', orderId: 900 } as const;
+  const duration = actionPreview(s, action).minutes;
+  s.commerce.orders[0].deadlineAt = s.clock.minute + duration;
+  const preview = actionPreview(s, action);
+  assert.equal(preview.error, undefined);
+  assert.equal(preview.finishAt, s.commerce.orders[0].deadlineAt);
+  const delivered = act(s, action);
+  assert.equal(delivered.commerce.orders[0].status, 'delivered');
+  assert.equal(delivered.ledger.depositLosses, 0);
+  assert.deepEqual(readSave(JSON.stringify(delivered)), delivered);
+  const late = structuredClone(s);
+  late.commerce.orders[0].deadlineAt--;
+  const original = structuredClone(late);
+  assert.ok(dispatch(late, action).error);
+  assert.deepEqual(late, original);
+  const expired = act(late, { type: 'wait', minutes: duration });
+  assert.equal(expired.commerce.orders[0].status, 'failed');
+  assert.equal(expired.ledger.depositLosses, 18);
 });
