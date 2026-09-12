@@ -1,14 +1,23 @@
 # 项目文档索引
 
-当前版本：连续时间经营与首日沉浸体验更新。先读根目录 [玩法与开发说明](../README.md)，验证结论以 [最新验收报告](../TEST_REPORT.md) 为准。
+当前版本：v4时间与日常经营体验更新。先读根目录 [玩法与开发说明](../README.md)，验证结论以 [最新验收报告](../TEST_REPORT.md) 为准。
 
 ## 当前设计与实现
 
-- [连续时间与商人生活计划](plans/CONTINUOUS_TIME_PLAN.md)：本次完整设计及已完成的验收清单。
-- [连续时间逐项核对](reports/CONTINUOUS_TIME_AUDIT.md)：规则、住宅、贸易与公开接口的实现证据。
+- [美术工作台与单层导航](plans/FLAT_WORKBENCH_PLAN.md)：封面铺满、紧凑详情、同页分区与图标说明；为最新界面约定。
+
+- [美术版界面实施](plans/ART_INTERFACE_PLAN.md)：场景、商品、设备、住宅状态与布局验收。
+- [美术素材库](../design/art-assets/README.md)：34 张原图、预览、提示词与网页派生清单。
+
+- [时间与日常经营体验更新方案](plans/TIME_EXPERIENCE_UPDATE_PLAN.md)：v4疲劳、营业收尾、收工与目标等待及验收标准。
+
+- [连续时间与商人生活计划](plans/CONTINUOUS_TIME_PLAN.md)：v3设计及当时验收清单；时间规则以v4方案为准。
+- [连续时间逐项核对](reports/CONTINUOUS_TIME_AUDIT.md)：v3规则、住宅、贸易与公开接口的历史实现证据。
 - [首日沉浸体验更新](reports/IMMERSIVE_UX_UPDATE.md)：街巷招工、时辰表、住宅分组、跨日文案与按钮对齐。
 
 ## 历史归档
+
+- [时间体验更新前验收报告](archive/TEST_REPORT_PRE_TIME_EXPERIENCE.md)：v3与首日体验的原始验证记录。
 
 以下保留设计演进和当时的验证结果，其中旧规则、旧测试数量及“待完成”记录不代表当前状态。
 

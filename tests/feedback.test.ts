@@ -7,7 +7,7 @@ void test('structured feedback uses actual recovery and work costs, with immutab
   const s = newGame(42);
   s.stamina = 95;
   const rest = dispatch(s, { type: 'rest' });
-  assert.ok(Math.abs(rest.result!.stamina - 3.5) < 1e-8);
+  assert.ok(Math.abs(rest.result!.stamina - 5) < 1e-8);
   assert.equal(rest.result?.cash, 0);
   assert.equal(rest.state.operationHistory.length, 1);
   const failed = dispatch(rest.state, { type: 'rest' }, 0);
@@ -18,7 +18,7 @@ void test('structured feedback uses actual recovery and work costs, with immutab
   const tired = structuredClone(rest.state);
   tired.buffs.tired = tired.clock.minute + 1440;
   const work = dispatch(tired, { type: 'short' });
-  assert.ok(Math.abs(work.result!.stamina + 33) < 1e-8);
+  assert.ok(Math.abs(work.result!.stamina + 30) < 1e-8);
   assert.equal(work.result?.cash, 25);
   assert.equal(work.result?.workRemaining, null);
   assert.equal(

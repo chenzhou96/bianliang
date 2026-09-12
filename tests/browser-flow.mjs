@@ -12,7 +12,7 @@ const click = async (name) => {
     await page.getByRole('button', { name: '确认执行', exact: true }).click();
 };
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v4')));
 try {
   await page.goto(process.env.GAME_URL ?? 'http://127.0.0.1:4173');
   await click('走进汴梁 · 3000文');
@@ -34,7 +34,7 @@ try {
     }
     if (s.housing.id === 'street') {
       await click('住宅');
-      await click('房屋');
+      // 房屋 is available on the same workspace.
       await page.getByRole('button', { name: /租赁小屋 接手/ }).click();
       await click('租下');
       continue;
@@ -43,7 +43,7 @@ try {
     const cycle = Math.floor((s.clock.minute - 360) / 1440);
     if (s.life.ateCycle !== cycle && time >= 360 && time < 1440) {
       await click('住宅');
-      await click('生活');
+      // 生活 is available on the same workspace.
       await page
         .getByLabel('主餐', { exact: true })
         .selectOption(
@@ -76,17 +76,23 @@ try {
     }
     if (time >= 480 && time <= 900 && s.stamina < 30) {
       await click('人物');
-      await click('休息1小时 · 恢复20体力');
+      await click('休息1小时');
       continue;
     }
     await click('住宅');
-    await click('生活');
+    // 生活 is available on the same workspace.
     await page.getByLabel('住宿', { exact: true }).selectOption(s.housing.id);
     const untilMorning = time < 480 ? 480 - time : 1920 - time;
     const minutes = Math.min(600, untilMorning);
     await page
+      .getByText('午休、自选睡眠与等待', { exact: true })
+      .evaluate((el) => (el.parentElement.open = true));
+    await page
       .getByLabel('睡眠小时', { exact: true })
       .fill(String(minutes / 60));
+    await page
+      .getByText('午休、自选睡眠与等待', { exact: true })
+      .evaluate((el) => (el.parentElement.open = true));
     await page.getByRole('button', { name: /^入睡 · 醒于/ }).click();
   }
   assert.equal(s.ending, 'return');

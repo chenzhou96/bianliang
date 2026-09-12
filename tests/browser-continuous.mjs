@@ -59,7 +59,7 @@ try {
     await page.evaluate((s) => {
       for (const key of Object.keys(localStorage))
         if (key.startsWith('bianliang-ui:')) localStorage.removeItem(key);
-      localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
+      localStorage.setItem('bianliang-save-v4', JSON.stringify(s));
     }, state);
     await page.reload({ waitUntil: 'networkidle' });
     await page.getByRole('button', { name: /继续第/ }).click();
@@ -83,7 +83,7 @@ try {
         .click();
       if (workspace === '资产') {
         await page.locator('.list-item').filter({ hasText: '炊饼' }).click();
-        const details = await page.locator('.detail').innerText();
+        const details = await page.locator('.detail').first().innerText();
         assert.match(details, /剩余保鲜/);
         assert.doesNotMatch(details, /日结束时到期/);
       }
@@ -94,18 +94,11 @@ try {
             ? ['行情', '机会']
             : ['默认'];
       for (const section of sections) {
-        if (workspace === '住宅')
-          await page
-            .getByRole('button', { name: section, exact: true })
-            .click();
         if (section === '机会') {
-          await page
-            .getByRole('button', { name: '货盘、夜市与收购', exact: true })
-            .click();
           for (const title of Object.values(TRADE_MILESTONES))
             await page.locator('summary').filter({ hasText: title }).click();
           assert.match(
-            await page.locator('.detail').last().innerText(),
+            await page.locator('.market-opportunities').innerText(),
             /纪念物：首批货签/,
           );
         }
@@ -130,7 +123,7 @@ try {
   });
   assert.equal(evening.error, undefined);
   await page.evaluate((s) => {
-    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v4', JSON.stringify(s));
   }, evening.state);
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -138,16 +131,23 @@ try {
     await page.locator('main').getAttribute('data-period'),
     'evening',
   );
-  await page.getByRole('button', { name: '等待30分钟', exact: true }).click();
+  await page.locator('.footer-wait').evaluate((el) => (el.open = true));
+  await page
+    .locator('.footer-wait')
+    .getByRole('button', { name: '等待30分钟', exact: true })
+    .click();
   assert.equal(await page.locator('main').getAttribute('data-period'), 'late');
   await page
     .getByRole('navigation', { name: '经营工作区' })
     .getByRole('button', { name: '住宅', exact: true })
     .click();
-  await page.getByRole('button', { name: '生活', exact: true }).click();
+  // 生活 is available on the same workspace.
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => (el.parentElement.open = true));
   await page.getByRole('button', { name: /^入睡 · 醒于/ }).click();
   const morning = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('bianliang-save-v3')),
+    JSON.parse(localStorage.getItem('bianliang-save-v4')),
   );
   assert.equal(morning.clock.minute, 1800);
   assert.equal(morning.day, 2);

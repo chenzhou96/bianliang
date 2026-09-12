@@ -23,12 +23,12 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v4')));
 async function load(s) {
   assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     localStorage.clear();
-    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v4', JSON.stringify(s));
   }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -94,7 +94,7 @@ try {
   await button('确认执行').click();
   const accepted = await read();
   assert.equal(accepted.cash, fixture.cash - target.deposit);
-  await page.getByRole('button', { name: /^进行中/ }).click();
+  await page.locator('.order-detail').waitFor();
   await button('交付全部货物').click();
   if (await page.getByRole('dialog').isVisible())
     await button('确认执行').click();
@@ -110,7 +110,11 @@ try {
   failed.event = null;
   await load(failed);
   await button('订单').click();
-  await page.getByRole('button', { name: /^进行中/ }).click();
+  await page.locator('.order-detail').waitFor();
+  await page
+    .locator('.orders-workbench .list-item')
+    .filter({ hasText: target.title })
+    .click();
   await button('放弃订单').click();
   assert.match(await page.getByRole('dialog').innerText(), /没收已冻结保证金/);
   await button('确认执行').click();
@@ -153,17 +157,25 @@ try {
     await load(developed);
     await button('订单').click();
     for (const name of ['可接订单', '进行中 (2/2)', '近期记录', '熟客']) {
-      await button(name).click();
+      await page
+        .getByRole('heading', {
+          name: name.startsWith('进行中') ? '进行中' : name,
+          exact: true,
+        })
+        .scrollIntoViewIfNeeded();
       await layout(`${w}x${h}-${name.replaceAll('/', '-')}`);
     }
     await page
       .locator('.list-item')
       .filter({ hasText: CUSTOMERS.baker.name })
+      .filter({
+        has: page.locator('strong', { hasText: CUSTOMERS.baker.name }),
+      })
       .click();
     await button('拜访与回访').click();
     assert.match((await read()).story, /大户|掌勺/);
     await button('人物').click();
-    await button('经营成长').click();
+    // 经营成长 is available on the same workspace.
     await layout(`${w}x${h}-growth`);
     await page.getByRole('button', { name: /^今日要事/ }).click();
     await layout(`${w}x${h}-today`);
@@ -220,7 +232,7 @@ try {
     await page.setViewportSize({ width: w, height: h });
     await load(settled.state);
     await button('住宅').click();
-    await button('生活').click();
+    // 生活 is available on the same workspace.
     await page.locator('.wake-summary summary').click();
     await layout(w + 'x' + h + '-sleep-summary');
     await page
@@ -242,12 +254,23 @@ try {
       await rows.nth(i).click();
       const title = await rows.nth(i).locator('strong').innerText();
       seenGoods.add(title.trim());
-      assert.equal(await rows.nth(i).locator('svg.good-icon').count(), 1);
+      assert.equal(await rows.nth(i).locator('.good-art img').count(), 1);
+      assert(
+        await rows
+          .nth(i)
+          .locator('.good-art img')
+          .evaluate(async (img) => {
+            await img.decode();
+            return img.naturalWidth > 0;
+          }),
+      );
       assert.equal(
         Math.round(
-          (await page.locator('.detail svg.good-icon').boundingBox()).width,
+          (await page.locator('.detail .good-art').boundingBox()).width,
         ),
-        44,
+        Math.round(
+          Math.max(140, Math.min(180, page.viewportSize().width * 0.1)),
+        ),
       );
     }
     await layout('art-goods-page-' + p);
@@ -257,7 +280,10 @@ try {
   await page.addStyleTag({
     content: '.good-icon { visibility: hidden !important; }',
   });
-  assert.match(await page.locator('.detail').innerText(), /药材|茶叶|酒/);
+  assert.match(
+    await page.locator('.detail').first().innerText(),
+    /药材|茶叶|酒/,
+  );
   await layout('art-text-fallback');
   for (const [width, height] of [
     [1536, 864],
@@ -279,19 +305,22 @@ try {
     }
     await load(trusted);
     await button('订单').click();
-    await button('熟客').click();
+    // 熟客 is available on the same workspace.
     for (const id of CUSTOMER_IDS) {
       await page
-        .locator('.list-item')
+        .locator('.customers-section .list-item')
         .filter({ hasText: CUSTOMERS[id].name })
         .click();
       await button('拜访与回访').click();
       assert.ok(
-        (await page.locator('.detail').innerText()).includes(
+        (await page.locator('.customers-section .detail').innerText()).includes(
           CUSTOMERS[id].stories[3],
         ),
       );
-      assert.match(await page.locator('.detail').innerText(), /4\/4/);
+      assert.match(
+        await page.locator('.customers-section .detail').innerText(),
+        /4\/4/,
+      );
       assert.ok(await button('拜访与回访').isDisabled());
     }
     assert.match(await page.locator('.vital').first().innerText(), /88.3\/100/);

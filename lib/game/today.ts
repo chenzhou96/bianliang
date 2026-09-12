@@ -1,4 +1,4 @@
-import { relativeMoment } from './time.ts';
+import { relativeMoment, fatigueLabel } from './time.ts';
 import { statusActive } from './status.ts';
 import { lifeCycle, nextDailyTime, timeOfDay } from './time.ts';
 import {
@@ -37,7 +37,7 @@ export function todayTasks(s: GameState): TodayTask[] {
       priority: 0,
       at: Math.floor(now / 1440) * 1440 + 1080,
       title: '普通市场即将收市',
-      detail: '18:00收市，成交需在收市前完成搬运。夜市18:00开张。',
+      detail: '18:00停止受理，提前10分钟办妥手续即可继续搬运。夜市18:00开张。',
       target: 'market',
     });
   if (s.life.ateCycle !== lifeCycle(now))
@@ -49,13 +49,13 @@ export function todayTasks(s: GameState): TodayTask[] {
       detail: `${relativeMoment(nextDailyTime(now, 360), now)}前吃一份主餐；未吃会损失8健康。`,
       target: 'housing',
     });
-  if (s.clock.sleepDebt >= 4 || timeOfDay(now) >= 1320 || timeOfDay(now) < 360)
+  if (s.clock.fatigueMinutes >= 840)
     items.push({
       id: 'sleep',
       priority: 0,
       at: now,
       title: '安排睡眠',
-      detail: `睡眠不足${s.clock.sleepDebt.toFixed(1)}小时；短暂休息不能替代睡眠。凌晨02:00—06:00继续熬夜会损害健康，越晚越严重。`,
+      detail: `${fatigueLabel(s.clock.fatigueMinutes)}，睡眠债${s.clock.sleepDebt.toFixed(1)}小时；短休补充体力，睡眠才能减轻疲劳。`,
       target: 'housing',
     });
   if (s.health < 40 || statusActive(s, 'cold'))

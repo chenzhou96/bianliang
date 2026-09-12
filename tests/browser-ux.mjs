@@ -12,12 +12,12 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v4')));
 async function load(s) {
   assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     localStorage.clear();
-    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v4', JSON.stringify(s));
   }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -86,17 +86,20 @@ try {
   await page.getByLabel('减少动态').uncheck();
   await load(newGame(20260911));
   await button('人物').click();
-  await button('休息1小时 · 恢复20体力').click();
-  assert.match(await page.locator('.record-feed').innerText(), /体力\s*\+18.5/);
+  await button('休息1小时').click();
+  assert.match(await page.locator('.record-feed').innerText(), /体力\s*\+20/);
   await button('街巷').click();
   await button('短工 · 25文').click();
   assert.match(await page.locator('.record-feed').innerText(), /现金\s*\+25文/);
   await button('住宅').click();
-  await button('生活').click();
+  // 生活 is available on the same workspace.
   await page.getByLabel('主餐', { exact: true }).selectOption('diner');
   await button('用主餐 · 30分钟').click();
   await page.getByLabel('住宿', { exact: true }).selectOption('inn');
   const beforeSleep = await read();
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => (el.parentElement.open = true));
   await page.getByRole('button', { name: /^入睡 · 醒于/ }).click();
   const saved = await read();
   assert.equal(saved.clock.minute, beforeSleep.clock.minute + 480);
@@ -122,12 +125,18 @@ try {
   await noOverflow('learned-and-treated');
   await load(learning);
   await button('住宅').click();
-  await button('生活').click();
+  // 生活 is available on the same workspace.
   assert.doesNotMatch(
     await page.getByLabel('住宿', { exact: true }).innerText(),
     /宅邸/,
   );
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => (el.parentElement.open = true));
   await page.getByLabel('睡眠小时', { exact: true }).fill('11');
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => (el.parentElement.open = true));
   assert(await page.getByRole('button', { name: /^入睡 · 醒于/ }).isDisabled());
   const legacy = newGame(19);
   await load(legacy);
@@ -137,7 +146,7 @@ try {
       'setItem',
     ).value;
     Storage.prototype.setItem = function (key, value) {
-      if (key === 'bianliang-save-v3')
+      if (key === 'bianliang-save-v4')
         throw new DOMException('Quota', 'QuotaExceededError');
       return original.call(this, key, value);
     };
@@ -152,7 +161,7 @@ try {
   assert.deepEqual(await read(), legacy);
   const downloading = page.waitForEvent('download');
   await button('导出当前进度').click();
-  assert((await downloading).suggestedFilename().includes('bianliang-save-v3'));
+  assert((await downloading).suggestedFilename().includes('bianliang-save-v4'));
   await noOverflow('save-failure');
   assert.deepEqual(errors, []);
   writeFileSync(

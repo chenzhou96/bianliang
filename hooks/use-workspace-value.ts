@@ -42,6 +42,14 @@ export function useWorkspaceValue<T extends string | number | boolean>(
       if (
         typeof stored === typeof initial &&
         (!choices[key] || choices[key].includes(String(stored))) &&
+        (!key.endsWith('.meal') ||
+          ['diner', 'bread', 'egg', 'saltedEgg', 'grain'].includes(
+            String(stored),
+          )) &&
+        (!key.endsWith('.bed') ||
+          ['inn', 'temple', 'street', ...HOUSING_IDS].includes(
+            String(stored),
+          )) &&
         (typeof stored !== 'number' || (Number.isFinite(stored) && stored >= 0))
       )
         return stored as T;

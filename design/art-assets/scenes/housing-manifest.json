@@ -1,0 +1,38 @@
+[
+  {
+    "id": "empty",
+    "prompt": "Create a new empty humble Northern Song Chinese domestic courtyard background for a life simulation game. Match the reference illustration's warm ivory paper, fine ink lines, muted Song painting washes and timber materials. Landscape 1536x1024. Small modest one story timber dwelling, grey tiled roof, simple open doorway, plaster wall, a leafy branch, a broad empty sunlit packed-earth courtyard. NO people, NO animals, NO chickens, NO chicken shelter, NO equipment, NO furniture, NO pots, NO baskets, NO firewood, NO crops. It must be an empty base layer for adding player's actual possessions later. House at the back in upper half; lower half open clear courtyard ground. No text, calligraphy, signage, watermarks or interface.",
+    "source": "/Users/zhouchen/.codex/generated_images/01a0950f-9327-7422-a6c5-3e464a431d5d/exec-fb38aada-2a84-4d08-aa35-49f1ef27208b.png",
+    "size": [
+      1536,
+      1024
+    ]
+  },
+  {
+    "id": "room",
+    "prompt": "Create a humble single rented room interior for a Northern Song Bianjing life simulation. Match reference Song painting fine ink linework, pale subdued color washes on warm ivory paper. Landscape 1536x1024. Small timber and plaster room, one plain low sleeping platform with folded linen bedding, one tiny lattice window and a simple wooden door with daylight. Modest, quiet, dignified poverty, not ruined. No people, animals, farming, workshop machinery, kitchen equipment, text or signs. No palatial ornament. Show the whole cozy room with empty floor foreground. This is the first housing tier; clearly a small rented ROOM, not an outdoor courtyard.",
+    "source": "/Users/zhouchen/.codex/generated_images/01a0950f-9327-7422-a6c5-3e464a431d5d/exec-2014e9fc-9666-4700-b589-ec8c1e2be797.png",
+    "size": [
+      1536,
+      1024
+    ]
+  },
+  {
+    "id": "yard",
+    "prompt": "Create a Northern Song Bianjing modest OWNED COURTYARD home, a step above a poor rented courtyard. Match reference fine ink Song painting, warm ivory paper, pale muted color washes. Landscape 1536x1024. Well-maintained medium sized one-storey timber house with clean pale plaster walls and grey tile roofs on two sides, a neat stone path through a broad empty courtyard, a small graceful tree in one corner. Simple gate, refined but not wealthy. No people, animals, furniture, pots, equipment, crops, text or lettering. The empty yard is ready for a player's actual workshop possessions. The architecture itself should feel more secure and cared for than the humble reference, not a palace.",
+    "source": "/Users/zhouchen/.codex/generated_images/01a0950f-9327-7422-a6c5-3e464a431d5d/exec-4a6a6425-5a88-4464-a8af-82cb57beae03.png",
+    "size": [
+      1536,
+      1024
+    ]
+  },
+  {
+    "id": "mansion",
+    "prompt": "Create a prosperous merchant's owned mansion courtyard in Northern Song Bianjing for a life simulation game. Match reference Song painting fine ink outlines, restrained pale mineral washes, warm ivory paper. Landscape 1536x1024. Spacious elegant courtyard enclosed by a substantial two-storey timber main hall and side galleries, refined grey tiled roofs, cream plaster and dark warm timber, tasteful restrained red columns, orderly stone paving and one old shade tree. It should clearly be the highest domestic housing tier yet a merchant's HOUSE, not an imperial palace or temple. No people, animals, workshop equipment, furniture, pots, text, signs or lettering. Broad empty courtyard foreground for actual player's possessions. A quiet earned sense of prosperity.",
+    "source": "/Users/zhouchen/.codex/generated_images/01a0950f-9327-7422-a6c5-3e464a431d5d/exec-6d97f2b6-c8d3-416b-bdd7-a206f6f286d1.png",
+    "size": [
+      1536,
+      1024
+    ]
+  }
+]

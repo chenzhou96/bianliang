@@ -1,4 +1,4 @@
-import { citySchedule } from './time.ts';
+import { citySchedule, fatigueLabel } from './time.ts';
 import { productionReadyAt } from './production-time.ts';
 import { statusActive } from './status.ts';
 import { publicOpportunities } from './market-opportunities.ts';
@@ -38,6 +38,7 @@ export function publicState(s: GameState | null) {
     revision: s.revision,
     day: s.day,
     clock: s.clock,
+    fatigue: fatigueLabel(s.clock.fatigueMinutes),
     home: s.home,
     marketOpportunities: publicOpportunities(s),
     life: s.life,
@@ -224,7 +225,7 @@ export function registerGameTools(
             a.type === 'trade' &&
             GOOD_IDS.includes(a.good) &&
             ['buy', 'sell'].includes(a.side)
-              ? maximumTrade(s, a.good, a.side)
+              ? maximumTrade(s, a.good, a.side, a.transport)
               : a.type === 'produce' && RECIPES.some((r) => r.id === a.recipeId)
                 ? maximumProduction(s, a.recipeId)
                 : undefined;
@@ -262,6 +263,39 @@ export function registerGameTools(
             type: 'object',
             properties: {
               type: { type: 'string' },
+              minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+              transport: { enum: ['self', 'cart', 'porter'] },
+              target: {
+                type: 'object',
+                properties: {
+                  kind: {
+                    enum: ['opening', 'morning', 'production', 'delivery'],
+                  },
+                  venue: {
+                    enum: [
+                      'market',
+                      'nightMarket',
+                      'tea',
+                      'customer',
+                      'business',
+                    ],
+                  },
+                  jobId: { type: 'integer' },
+                  orderId: { type: 'integer' },
+                  transport: { enum: ['self', 'cart', 'porter'] },
+                },
+                required: ['kind'],
+                additionalProperties: false,
+              },
+              lotId: { type: 'string' },
+              requestId: { type: 'string' },
+              count: { type: 'integer' },
+              enabled: { type: 'boolean' },
+              facility: {
+                enum: ['warehouse', 'coldStorage', 'reception', 'bedroom'],
+              },
+              goods: { type: 'array', items: { enum: GOOD_IDS } },
+              customer: { enum: CUSTOMER_IDS },
               good: { enum: GOOD_IDS },
               quantity: { type: 'number' },
               side: { enum: ['buy', 'sell'] },

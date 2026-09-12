@@ -302,7 +302,7 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
         );
     }
     if (s.health < 65 && s.cash > 160) act({ type: 'treat', mode: 'fast' });
-    if (s.life.ateCycle !== lifeCycle(s.clock.minute)) {
+    if (late && s.life.ateCycle !== lifeCycle(s.clock.minute)) {
       if (quantity(s, 'bread') >= 1) act({ type: 'eat', meal: 'bread' });
       else act({ type: 'eat', meal: 'diner' });
     }
@@ -332,13 +332,21 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
         if (!act(making)) break;
       }
     }
-    if (s.clock.minute < bedtime)
-      act({ type: 'wait', minutes: bedtime - s.clock.minute });
-    act({
-      type: 'sleep',
-      minutes: late ? 240 : 480,
-      bed: s.housing.id === 'street' ? 'temple' : s.housing.id,
-    });
+    if (late) {
+      if (s.clock.minute < bedtime)
+        act({ type: 'wait', minutes: bedtime - s.clock.minute });
+      act({
+        type: 'sleep',
+        minutes: 240,
+        bed: s.housing.id === 'street' ? 'temple' : s.housing.id,
+      });
+    } else {
+      act({
+        type: 'closeDay',
+        bed: s.housing.id === 'street' ? 'temple' : s.housing.id,
+        meal: quantity(s, 'bread') >= 1 ? 'bread' : 'diner',
+      });
+    }
     const nextStart = Math.floor(start / 1440) * 1440 + 1920;
     if (s.clock.minute < nextStart)
       act({ type: 'wait', minutes: nextStart - s.clock.minute });
@@ -384,6 +392,17 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
     productionProfit: s.ledger.productionRevenue - s.ledger.productionCost,
     actions,
     actionCounts,
+    dailyLifeActions:
+      ['eat', 'rest', 'sleep', 'closeDay', 'feed', 'snack', 'treat'].reduce(
+        (n, key) => n + (actionCounts[key] ?? 0),
+        0,
+      ) / snapshots.length,
+    dailyWaitActions:
+      ((actionCounts.wait ?? 0) + (actionCounts.waitUntil ?? 0)) /
+      snapshots.length,
+    openingRejections: Object.entries(rejected)
+      .filter(([reason]) => /营业|收工|受理/.test(reason))
+      .reduce((n, [, count]) => n + count, 0),
     rejected,
     snapshots,
   };
@@ -524,7 +543,7 @@ if (!isMainThread && workerData?.runner) {
       'tests/browser-output/economy/continuous.json',
     JSON.stringify(
       {
-        strategyVersion: 9,
+        strategyVersion: 10,
         samples,
         days,
         mode: gates.completeSample ? 'formal' : 'diagnostic',

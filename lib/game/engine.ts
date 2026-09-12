@@ -19,7 +19,7 @@ import {
   usedHomeSlots,
 } from './home.ts';
 import { transportQuote, type Transport } from './time.ts';
-import { actionTiming } from './action-time.ts';
+import { actionTiming, receptionMinutes, closeDayPlan } from './action-time.ts';
 import {
   OPENING_HOURS,
   nextDailyTime,
@@ -359,7 +359,7 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
     },
     saveRevision: 3,
     operationHistory: [],
-    version: 3,
+    version: 4,
     rules: RULES.version,
     seed: seed >>> 0,
     rng: seed >>> 0,
@@ -823,19 +823,21 @@ export function actionPreview(s: GameState, a: Action) {
         )
       : undefined;
   const returning = a.type === 'return' && !!returnTerms(s);
-  const result = dispatch(
+  const result = dispatchInternal(
     s,
     risky
       ? ({ ...a, confirm: orderTerms(order) } as Action)
       : returning
         ? ({ ...a, confirm: returnTerms(s) } as Action)
         : a,
+    s.revision,
+    true,
   );
   const finishAt = s.clock.minute + duration;
   const crossesDawn = nextDailyTime(s.clock.minute, 360) <= finishAt;
   const uncertainOutcome = a.type === 'choice';
   const theftRisk =
-    a.type === 'sleep' &&
+    (a.type === 'sleep' || a.type === 'closeDay') &&
     (a.bed === 'street' ||
       a.bed === 'temple' ||
       (a.bed !== 'inn' &&
@@ -853,12 +855,48 @@ export function actionPreview(s: GameState, a: Action) {
   );
   const opening = venue === 'home' ? null : OPENING_HOURS[venue];
   const opensNext =
-    opening && !canFinishAtVenue(s.clock.minute, duration, venue)
+    opening &&
+    !canFinishAtVenue(s.clock.minute, receptionMinutes(a, duration), venue)
       ? nextDailyTime(s.clock.minute, opening[0])
       : null;
+  const planning =
+    a.type === 'closeDay' || a.type === 'waitUntil' || a.type === 'wait';
+  const missedMeal =
+    crossesDawn &&
+    result.state.logs.some(
+      (l) => l.id >= s.nextId && l.text.includes('未吃主餐'),
+    );
+  const housingRisk =
+    result.state.housing.id !== s.housing.id ||
+    (!s.housing.maintenanceSuspended &&
+      result.state.housing.maintenanceSuspended);
+  let segments: ReturnType<typeof closeDayPlan>['segments'] = [];
+  if (a.type === 'closeDay') {
+    try {
+      segments = closeDayPlan(s, a).segments;
+    } catch {
+      /* Error is shown by dispatch. */
+    }
+  }
+  let earlierTarget: import('./types.ts').WaitTarget | null = null;
+  if (planning && deadlineRisks.length) {
+    for (const order of [...deadlineRisks].sort(
+      (x, y) => x.deadlineAt - y.deadlineAt,
+    )) {
+      const candidate: Action = {
+        type: 'waitUntil',
+        target: { kind: 'delivery', orderId: order.id },
+      };
+      if (!dispatch(s, candidate).error) {
+        earlierTarget = candidate.target;
+        break;
+      }
+    }
+  }
   return {
     error: result.error,
     startsAt: s.clock.minute,
+    venue,
     openingHours: opening,
     nextOpeningAt: opensNext,
     minutes: duration,
@@ -868,8 +906,24 @@ export function actionPreview(s: GameState, a: Action) {
     cashChange:
       uncertainOutcome || theftRisk ? null : result.state.cash - s.cash,
     energy,
-    confirmation: !!risky || returning,
+    segments,
+    earlierTarget,
+    receptionMinutes: receptionMinutes(a, duration),
+    confirmation:
+      !!risky ||
+      returning ||
+      (planning && (deadlineRisks.length > 0 || missedMeal || housingRisk)),
     warning: [
+      missedMeal ? '本次安排会错过主餐检查，健康将受损；请先安排饭食。' : '',
+      housingRisk ? '本次安排期间住房将退租或停止维护，请先准备房费。' : '',
+      a.type === 'closeDay' &&
+      segments.some(
+        (segment) =>
+          segment.kind === 'sleep' && segment.finishAt - segment.startsAt < 480,
+      )
+        ? '本次睡眠不足8小时，预计恢复较少。'
+        : '',
+
       opensNext
         ? `下次可办理：${formatMoment(opensNext)}；营业${formatClock(opening![0])}—${opening![1] === 1440 ? '24:00' : formatClock(opening![1])}。`
         : '',
@@ -884,8 +938,10 @@ export function actionPreview(s: GameState, a: Action) {
       uncertainOutcome
         ? '回应结果尚未确定；按已知线索判断，不预先显示随机报酬。'
         : '',
-      theftRisk ? '此住宿有失窃风险，现金变化无法预先确定。' : '',
-      a.type !== 'sleep' && duration > 0 && multiplier > 1
+      theftRisk
+        ? '此住宿有失窃风险，现金变化无法预先确定；恢复与住房预览未计入随机失窃，失窃可能影响房费。'
+        : '',
+      energy > 0 && multiplier > 1
         ? `困倦使本次行动体力成本增至${multiplier.toFixed(2)}倍。`
         : '',
       energy > 0 && s.stamina >= 10 && s.stamina - energy < 10
@@ -1376,6 +1432,7 @@ function advanceGameTime(
   minutes: number,
   sleeping = false,
   bed?: import('./types.ts').Bed,
+  projecting = false,
 ) {
   for (let i = 0; i < minutes; i++) {
     const due = timelineEvents(s.clock.minute, s.clock.minute + 1, []);
@@ -1384,7 +1441,8 @@ function advanceGameTime(
     const warm = active(s, 'warm');
     if (sleeping) {
       s.clock.minute++;
-      s.clock.sleepDebt = Math.max(0, s.clock.sleepDebt - 1 / 30);
+      s.clock.fatigueMinutes = Math.max(0, s.clock.fatigueMinutes - 2);
+      s.clock.sleepDebt = Math.max(0, s.clock.sleepDebt - 1 / 60);
       const effectiveBed =
         !['inn', 'temple', 'street'].includes(bed ?? '') &&
         (bed !== s.housing.id || s.housing.maintenanceSuspended)
@@ -1405,7 +1463,7 @@ function advanceGameTime(
       if (effectiveBed === 'street') s.health -= 3 / 480;
       const theft =
         effectiveBed === 'street' ? 0.2 : effectiveBed === 'temple' ? 0.1 : 0;
-      if (theft && random(s) < 1 - (1 - theft) ** (1 / 480)) {
+      if (theft && random(s) < 1 - (1 - theft) ** (1 / 480) && !projecting) {
         const loss = Math.min(50, Math.floor(s.cash * 0.1));
         money(s, -loss, '临时住宿失窃');
         s.ledger.losses += loss;
@@ -1428,11 +1486,14 @@ function advanceGameTime(
     }
     const clockMinute = timeOfDay(s.clock.minute);
     if (!sleeping && clockMinute === 1020)
-      log(s, '17:00：普通市场将在18:00收市，请预留搬运时间。');
-    if (!sleeping && clockMinute === 1320)
-      log(s, '22:00：夜已深，继续行动的体力成本将逐渐增加。');
-    if (!sleeping && clockMinute === 120)
-      log(s, '02:00：继续熬夜开始损害健康，代价会逐渐加重。');
+      log(
+        s,
+        '17:00：普通市场将在18:00收市，请在收市前办妥手续，已受理的搬运可继续。',
+      );
+    if (!sleeping && s.clock.fatigueMinutes === 840)
+      log(s, '有些疲惫了，可按经营安排选择休息。');
+    if (!sleeping && s.clock.fatigueMinutes === 1441)
+      log(s, '疲劳负荷已超过24小时，继续清醒会损害健康。');
     if (
       !sleeping &&
       clockMinute === 1080 &&
@@ -1521,7 +1582,6 @@ function advanceGameTime(
       break;
     }
   }
-  if (sleeping && minutes >= 240) s.clock.awakeMinutes = 0;
 }
 
 function expireTimedOrders(s: GameState) {
@@ -1625,11 +1685,108 @@ export function dispatch(
   state: GameState,
   action: Action,
   expectedRevision = state.revision,
+) {
+  return dispatchInternal(state, action, expectedRevision);
+}
+
+function dispatchInternal(
+  state: GameState,
+  action: Action,
+  expectedRevision = state.revision,
+  projecting = false,
 ): { state: GameState; error?: string; result?: OperationResult } {
   try {
     if (expectedRevision !== state.revision)
       throw Error('操作已更新，请勿重复提交');
     if (state.phase === 'ended') throw Error('本局已经结束');
+    if (action.type === 'closeDay' || action.type === 'waitUntil') {
+      let next = state;
+      const steps: Action[] = [];
+      if (action.type === 'closeDay') {
+        if (!['inn', 'temple', 'street', state.housing.id].includes(action.bed))
+          throw Error('只能使用当前住所或临时住宿，请重新选择');
+        if (
+          action.meal !== undefined &&
+          !['diner', 'bread', 'egg', 'saltedEgg', 'grain'].includes(action.meal)
+        )
+          throw Error('请选择有效的饭食');
+        const plan = closeDayPlan(state, action);
+        if (plan.meal) steps.push({ type: 'eat', meal: plan.meal });
+        if (plan.idle) steps.push({ type: 'wait', minutes: plan.idle });
+        steps.push({ type: 'sleep', minutes: plan.sleeping, bed: action.bed });
+      } else {
+        const minutes = actionTiming(state, action).minutes;
+        if (action.target.kind === 'delivery') {
+          const delivery: Action = {
+            type: 'deliverOrder',
+            orderId: action.target.orderId,
+            transport: action.target.transport,
+          };
+          const check = applyAction(state, delivery, state.revision);
+          if (check.error) throw Error(check.error);
+          if (action.target.transport === 'cart' && !state.home.cart)
+            throw Error('请先购买手推车');
+        }
+        steps.push({ type: 'wait', minutes });
+      }
+      for (const step of steps) {
+        const result = dispatchInternal(next, step, next.revision, projecting);
+        if (result.error) throw Error(result.error);
+        next = result.state;
+        if (next.phase === 'ended') break;
+      }
+      if (
+        action.type === 'waitUntil' &&
+        action.target.kind === 'production' &&
+        next.phase !== 'ended'
+      ) {
+        const jobId = action.target.jobId;
+        if (
+          next.jobs.some((job) => job.id === jobId && job.status === 'queued')
+        )
+          throw Error(
+            '等待期间生产会暂停，无法在目标时刻完工，请先处理住房或设备',
+          );
+      }
+      if (
+        action.type === 'waitUntil' &&
+        action.target.kind === 'delivery' &&
+        next.phase !== 'ended'
+      ) {
+        const check = dispatch(next, {
+          type: 'deliverOrder',
+          orderId: action.target.orderId,
+          transport: action.target.transport,
+        });
+        if (check.error) throw Error(`等待后无法交付：${check.error}`);
+      }
+      next.revision = state.revision + 1;
+      if (action.type === 'closeDay') {
+        next.life.wakeSummary = {
+          at: next.clock.minute,
+          lines: [
+            ...next.logs
+              .filter(
+                (l) => l.id >= state.nextId && /完成|产蛋|入库/.test(l.text),
+              )
+              .slice(0, 7)
+              .map((l) => `${l.text}${l.items ?? ''}`),
+            `收工期间净收支${next.cash - state.cash}文，体力${next.stamina.toFixed(1)}，健康变化${(next.health - state.health).toFixed(1)}。`,
+            ...next.logs
+              .filter(
+                (l) =>
+                  l.id >= state.nextId &&
+                  /腐坏|不足|未吃|失窃|违约|暂停|退租/.test(l.text),
+              )
+              .slice(0, 6)
+              .map((l) => `${l.text}${l.items ?? ''}`),
+          ],
+        };
+      }
+      const result = operationResult(state, next, action);
+      next.operationHistory = [...state.operationHistory, result].slice(-50);
+      return { state: next, result };
+    }
     const timing = actionTiming(state, action);
     if (
       !Number.isSafeInteger(timing.minutes) ||
@@ -1637,8 +1794,28 @@ export function dispatch(
       timing.minutes > 1440
     )
       throw Error('单次行动时间须在0至1440分钟内');
-    if (!canFinishAtVenue(state.clock.minute, timing.minutes, timing.venue))
-      throw Error('当前营业时间不足以完成此行动，请查看下次营业时间');
+    if (
+      !canFinishAtVenue(
+        state.clock.minute,
+        receptionMinutes(action, timing.minutes),
+        timing.venue,
+      )
+    )
+      throw Error('当前营业时间不足以办妥此行动，请查看下次营业时间');
+    if (action.type === 'rest' && state.stamina >= staminaMax(state))
+      throw Error('体力已满，无净恢复收益；可选择目标等待');
+    if (action.type === 'buyLot') {
+      const lot = state.marketOffers.lots.find((l) => l.id === action.lotId);
+      if (lot && state.clock.minute + 10 > lot.closesAt)
+        throw Error('货盘收市前来不及办妥手续');
+    }
+    if (action.type === 'supplyRequest') {
+      const request = state.marketOffers.requests.find(
+        (r) => r.id === action.requestId,
+      );
+      if (request && state.clock.minute + timing.minutes > request.deadline)
+        throw Error('无法在收购截止前完成交付');
+    }
     if (action.type === 'sleep') {
       if (action.minutes < 60 || action.minutes > 600)
         throw Error('睡眠时长须为1至10小时');
@@ -1662,9 +1839,9 @@ export function dispatch(
         throw Error('请先购买手推车');
       if (
         action.transport === 'porter' &&
-        !canFinishAtVenue(state.clock.minute, timing.minutes, 'porter')
+        !canFinishAtVenue(state.clock.minute, 10, 'porter')
       )
-        throw Error('脚夫仅在08:00—18:00接活，需在收工前完成');
+        throw Error('脚夫仅在08:00—18:00受理，需在收工前办妥10分钟手续');
     }
     const check = applyAction(state, action, expectedRevision);
     if (check.error) throw Error(check.error);
@@ -1688,6 +1865,7 @@ export function dispatch(
       timing.minutes,
       action.type === 'sleep',
       action.type === 'sleep' ? action.bed : undefined,
+      projecting,
     );
     releaseTrade(s);
     if (s.phase === 'ended') {
@@ -1698,7 +1876,12 @@ export function dispatch(
     // Quote is locked at dispatch; ordinary daily prices remain the new day's prices.
     const actualPrices = s.prices;
     if (action.type === 'trade') s.prices = structuredClone(state.prices);
-    const applied = applyAction(s, action, s.revision);
+    const applied = applyAction(
+      s,
+      action,
+      s.revision,
+      action.type === 'buyLot' ? state.clock.minute : undefined,
+    );
     if (applied.error) throw Error(applied.error);
     const next = applied.state;
     next.prices = actualPrices;
@@ -1754,6 +1937,12 @@ export function dispatch(
             .slice(-12),
         ],
       };
+    if (
+      action.type === 'rest' &&
+      next.stamina <= state.stamina &&
+      next.phase !== 'ended'
+    )
+      throw Error('本次休息无净恢复收益，请安排睡眠或目标等待');
     const result = operationResult(state, next, action);
     if (isOperatingAction(action))
       next.operationHistory = [...state.operationHistory, result].slice(-50);
@@ -1772,6 +1961,7 @@ function applyAction(
   state: GameState,
   action: Action,
   expectedRevision = state.revision,
+  acceptedAt?: number,
 ): { state: GameState; error?: string; result?: OperationResult } {
   if (expectedRevision !== state.revision)
     return {
@@ -1856,8 +2046,8 @@ function applyAction(
         if (
           !lot ||
           lot.bought ||
-          s.clock.minute < lot.opensAt ||
-          s.clock.minute > lot.closesAt
+          (acceptedAt ?? s.clock.minute) < lot.opensAt ||
+          (acceptedAt ?? s.clock.minute) > lot.closesAt
         )
           throw Error('货盘已成交或不在营业时间');
         if (
@@ -2689,7 +2879,7 @@ export function readSave(raw: string): GameState {
     const s = JSON.parse(raw) as GameState;
     if (
       s.saveRevision !== 3 ||
-      s.version !== 3 ||
+      s.version !== 4 ||
       !validClock(s.clock) ||
       !validContinuousSave(s)
     )
@@ -2803,7 +2993,7 @@ export function readSave(raw: string): GameState {
     if (
       !shape(s, model) ||
       !validCommerce(s) ||
-      s.version !== 3 ||
+      s.version !== 4 ||
       s.rules !== RULES.version ||
       ![3000, 30000].includes(s.target) ||
       !Number.isSafeInteger(s.cash) ||

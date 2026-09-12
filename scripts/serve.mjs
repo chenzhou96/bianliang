@@ -32,7 +32,7 @@ const server = http.createServer(async (req, res) => {
       res.end(
         JSON.stringify({
           app: 'bianliang-homecoming',
-          version: '3.0-continuous-time',
+          version: '4.0-time-experience',
         }),
       );
       return;

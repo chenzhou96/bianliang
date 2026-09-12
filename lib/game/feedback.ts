@@ -18,7 +18,10 @@ export function isOperatingAction(action: Action) {
 export function actionKey(action: Action): string {
   return Object.entries(action)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}:${String(value)}`)
+    .map(
+      ([key, value]) =>
+        `${key}:${typeof value === 'object' ? JSON.stringify(value, Object.keys(value ?? {}).sort()) : String(value)}`,
+    )
     .join('|');
 }
 
@@ -39,6 +42,8 @@ export function actionTitle(action: Action): string {
     eat: '用餐完成',
     feed: '喂养完成',
     sleep: '睡眠结束',
+    closeDay: '收工安排结束',
+    waitUntil: '目标等待结束',
     wait: '等待结束',
     autoFeed: '自动喂养设置',
     refill: '原料补齐',

@@ -40,7 +40,7 @@ await test('无需夜间界面即可跨午夜睡醒，06点房费每周期只扣
   assert.equal(s.clock.minute, 1800);
   assert.equal(s.day, 2);
   assert.equal(s.cash, cash - 12);
-  assert.equal(s.clock.awakeMinutes, 0);
+  assert.equal(s.clock.fatigueMinutes, 0);
   assert.equal(s.phase, 'day');
   s = act(s, { type: 'wait', minutes: 1 });
   assert.equal(s.cash, cash - 12);
@@ -77,7 +77,8 @@ await test('休息可重复但占用时间，不清除睡眠不足', () => {
   const debt = s.clock.sleepDebt;
   s = act(s, { type: 'rest' });
   assert.equal(s.stamina, 50);
-  assert.ok(s.clock.sleepDebt > debt);
+  assert.equal(s.clock.sleepDebt, debt);
+  assert.equal(s.clock.fatigueMinutes, 120);
   assert.equal(s.clock.minute, 600);
 });
 

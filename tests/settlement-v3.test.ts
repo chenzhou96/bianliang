@@ -92,7 +92,7 @@ await test('06点欠租先暂停设备，同刻应完工的生产不会越过停
 await test('搬运途中死亡释放货款和交货库存，不提前获得成交收入或购入货物', () => {
   const s = newGame(40);
   s.health = 0.01;
-  s.clock.awakeMinutes = 1500;
+  s.clock.fatigueMinutes = 1500;
   const bought = act(s, {
     type: 'trade',
     good: 'tea',

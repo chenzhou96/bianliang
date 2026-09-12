@@ -1,0 +1,716 @@
+[
+  {
+    "file": "public/art/equipment/brewVat-v1.webp",
+    "source": "design/art-assets/equipment/brewVat-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 27698,
+    "sha256": "5cbe936501b6346119b71531afed3c4891c64f03d80fea3d30056a4de2c51091"
+  },
+  {
+    "file": "public/art/equipment/coop-v1.webp",
+    "source": "design/art-assets/equipment/coop-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 38548,
+    "sha256": "ec306cb01815117d7cdf13120fca4bca14a715f0aebfe0b3421570e1f970f991"
+  },
+  {
+    "file": "public/art/equipment/loom-v1.webp",
+    "source": "design/art-assets/equipment/loom-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 28830,
+    "sha256": "debb845daf5f02be6cc110ec62c879610b1b6e9e183bf7486e03a1426eb8e613"
+  },
+  {
+    "file": "public/art/equipment/mill-v1.webp",
+    "source": "design/art-assets/equipment/mill-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 34278,
+    "sha256": "a0322e193b1fb43ca8ea5c12ea6afd4220cd8723ff961366ced036410a2b6ff1"
+  },
+  {
+    "file": "public/art/equipment/pickleVat-v1.webp",
+    "source": "design/art-assets/equipment/pickleVat-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 30324,
+    "sha256": "25330cd0f97aa97c0aadc728b6911fa62074c88a5c446fa39f05b15c0487a76c"
+  },
+  {
+    "file": "public/art/equipment/spinningWheel-v1.webp",
+    "source": "design/art-assets/equipment/spinningWheel-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 27566,
+    "sha256": "0e85b8b7f5d2d72aae9dacef2e710d45fe953e801e21c4988ca036455d2a1e76"
+  },
+  {
+    "file": "public/art/equipment/stove-v1.webp",
+    "source": "design/art-assets/equipment/stove-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 29096,
+    "sha256": "ebef2eddf1c9c7950f040917e6a759eca02b8b495bb3538ddcf71a9f80843061"
+  },
+  {
+    "file": "public/art/goods/bread-thumb.webp",
+    "source": "design/art-assets/goods/bread-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1452,
+    "sha256": "fe3916e0b1635c085e9444a009417af48b53717c80926595cad1b79395b89079"
+  },
+  {
+    "file": "public/art/goods/bread-v1.webp",
+    "source": "design/art-assets/goods/bread-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 19402,
+    "sha256": "6435d6a0c5469e2e3a023aacb881bccb5fc7694845df23922cf16672d48af91d"
+  },
+  {
+    "file": "public/art/goods/cloth-thumb.webp",
+    "source": "design/art-assets/goods/cloth-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1394,
+    "sha256": "bdc5543cf7052a9f92741cc0a492572c4aece54b255c79879f75b3a7fb6fd8ce"
+  },
+  {
+    "file": "public/art/goods/cloth-v1.webp",
+    "source": "design/art-assets/goods/cloth-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 30768,
+    "sha256": "eb768fbff7b4f942a6ecf186699fcf303fe4ff9ddfc37db15418d4a9f7d37d71"
+  },
+  {
+    "file": "public/art/goods/egg-thumb.webp",
+    "source": "design/art-assets/goods/egg-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1870,
+    "sha256": "575b80e328f009a0e052fa6c4252c5ce2597ea6741cd10c287851af8bcdcfb3c"
+  },
+  {
+    "file": "public/art/goods/egg-v1.webp",
+    "source": "design/art-assets/goods/egg-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 28098,
+    "sha256": "fb87b0a7884d3785fd2bc08aca2862cf4545e77a97517dd04107c048a1e11e0f"
+  },
+  {
+    "file": "public/art/goods/firewood-thumb.webp",
+    "source": "design/art-assets/goods/firewood-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 2046,
+    "sha256": "4a5662ddae190362f259ca9821efe19de40c99941463410c8beae4d290e98a78"
+  },
+  {
+    "file": "public/art/goods/firewood-v1.webp",
+    "source": "design/art-assets/goods/firewood-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 30782,
+    "sha256": "450717c8abdac055e50bad3610c46efb310b980cd48b3bcf8f531fcad25db6f4"
+  },
+  {
+    "file": "public/art/goods/flour-thumb.webp",
+    "source": "design/art-assets/goods/flour-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1618,
+    "sha256": "01fa29533ad85a857ce651f37defa813cfcae529d7c806d79cde8073a638f1b6"
+  },
+  {
+    "file": "public/art/goods/flour-v1.webp",
+    "source": "design/art-assets/goods/flour-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 30172,
+    "sha256": "8cc8f42160668529ca8223b9bea38a6ecdf53a31b9eb186bfaa2b2b9ac280980"
+  },
+  {
+    "file": "public/art/goods/grain-thumb.webp",
+    "source": "design/art-assets/goods/grain-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1804,
+    "sha256": "af6b8e54b8b1d83ab4f8ddb1ee7ca752f59418d5fb4cd417776fb2bb8d57af0f"
+  },
+  {
+    "file": "public/art/goods/grain-v1.webp",
+    "source": "design/art-assets/goods/grain-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 32986,
+    "sha256": "7f14ce7fbcabc05d22cf52bb40da1097137fbaa7a35a605c91132c9b90bdcadd"
+  },
+  {
+    "file": "public/art/goods/hemp-thumb.webp",
+    "source": "design/art-assets/goods/hemp-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1786,
+    "sha256": "2c05149c2338dc966641d5d5b31d72d8f1782c7d9e61b2a83583814b1cd5aebe"
+  },
+  {
+    "file": "public/art/goods/hemp-v1.webp",
+    "source": "design/art-assets/goods/hemp-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 28782,
+    "sha256": "436471c093bf3edb349d84baa10ce6a78bc972a47be5a6c049642e20c741866c"
+  },
+  {
+    "file": "public/art/goods/hen-thumb.webp",
+    "source": "design/art-assets/goods/hen-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1574,
+    "sha256": "3f8b4bb1e5588cf1121c69c5e1eed5f906881d6b41426396a5cec64bb5a1271e"
+  },
+  {
+    "file": "public/art/goods/hen-v1.webp",
+    "source": "design/art-assets/goods/hen-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 21042,
+    "sha256": "0a9accb5d4fbaf720f6f51a2ec5966ecefe750fc3b689e42622ec2f918dd42c5"
+  },
+  {
+    "file": "public/art/goods/herb-thumb.webp",
+    "source": "design/art-assets/goods/herb-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 2300,
+    "sha256": "360fc53280fe59ac26be996bf0bb304af50db0f98306b4a7e557aaba5e47c852"
+  },
+  {
+    "file": "public/art/goods/herb-v1.webp",
+    "source": "design/art-assets/goods/herb-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 35850,
+    "sha256": "a642a0e7e51d4508899c8760ff5a438cb208b3d2f2b7b8d3fbf2b821ffa48822"
+  },
+  {
+    "file": "public/art/goods/salt-thumb.webp",
+    "source": "design/art-assets/goods/salt-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1436,
+    "sha256": "50ec856449c05ef0135783e56b447e245625eb239c955496f61f9dc2b8f8db82"
+  },
+  {
+    "file": "public/art/goods/salt-v1.webp",
+    "source": "design/art-assets/goods/salt-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 21932,
+    "sha256": "6dc1cfece0e21acf83c95ca92850d737de1927a7a07f61f2b669e040d8e635bb"
+  },
+  {
+    "file": "public/art/goods/saltedEgg-thumb.webp",
+    "source": "design/art-assets/goods/saltedEgg-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1394,
+    "sha256": "28c36505e168d3304154d3c6ada58cd05b7935986e517b981740ebfd8e8af213"
+  },
+  {
+    "file": "public/art/goods/saltedEgg-v1.webp",
+    "source": "design/art-assets/goods/saltedEgg-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 19810,
+    "sha256": "41e82bf3476fbea64b4978106dfe5cafa4853f4a44788726967b3df555194d9e"
+  },
+  {
+    "file": "public/art/goods/silk-thumb.webp",
+    "source": "design/art-assets/goods/silk-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1652,
+    "sha256": "3c96cd2d5ad7b6c58648da59faa43739623c6269a7428292b1f39f7878eb393c"
+  },
+  {
+    "file": "public/art/goods/silk-v1.webp",
+    "source": "design/art-assets/goods/silk-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 24304,
+    "sha256": "8b91ef193974dd3da3aac21aa45e80b8a1d617bdbe7e1f8d58ca215fd6ff94c4"
+  },
+  {
+    "file": "public/art/goods/silkRaw-thumb.webp",
+    "source": "design/art-assets/goods/silkRaw-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1212,
+    "sha256": "5827a578c415482ba617073ee0d0c88ddb6c96258a7e186331a0a75206a94343"
+  },
+  {
+    "file": "public/art/goods/silkRaw-v1.webp",
+    "source": "design/art-assets/goods/silkRaw-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 21000,
+    "sha256": "74f24d732c268e153cb9f8fc88bed50be99da98c59bd4564b97eb8423bbd6ede"
+  },
+  {
+    "file": "public/art/goods/tea-thumb.webp",
+    "source": "design/art-assets/goods/tea-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1978,
+    "sha256": "4154eb650fa700f92f1ed53930fb888b8cff487c191be5015e2cb2dfee695e1a"
+  },
+  {
+    "file": "public/art/goods/tea-v1.webp",
+    "source": "design/art-assets/goods/tea-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 30700,
+    "sha256": "6cc4a85769d7e63f6b62c3468e5b78bf275b06c5b6530c1a472d7374915a273c"
+  },
+  {
+    "file": "public/art/goods/thread-thumb.webp",
+    "source": "design/art-assets/goods/thread-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1526,
+    "sha256": "1fc549b7561bd2025c35cf1b98e356c1bf17714fc0fff5c2591a997dba45d39b"
+  },
+  {
+    "file": "public/art/goods/thread-v1.webp",
+    "source": "design/art-assets/goods/thread-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 25084,
+    "sha256": "ab246d664ad31016b6bf8fe8c7ba1a74a1f34b8903d5f49104629851358fca0d"
+  },
+  {
+    "file": "public/art/goods/wheat-thumb.webp",
+    "source": "design/art-assets/goods/wheat-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 2150,
+    "sha256": "b9a1fe76539d35c6e53c9423ead35abb12ebe94c9ce7c806a3af4d83058930c2"
+  },
+  {
+    "file": "public/art/goods/wheat-v1.webp",
+    "source": "design/art-assets/goods/wheat-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 36058,
+    "sha256": "fa134daa3c4f1f1c1f4f35ad77a76aad9d2d2dbc276cc22aa03f28e8b3185b02"
+  },
+  {
+    "file": "public/art/goods/wine-thumb.webp",
+    "source": "design/art-assets/goods/wine-v1.png",
+    "size": [
+      96,
+      96
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 1554,
+    "sha256": "2cf24bd23ac0bd0a9e749993c93b2160956c4b4bdfda980e8f95a7c2bfc88557"
+  },
+  {
+    "file": "public/art/goods/wine-v1.webp",
+    "source": "design/art-assets/goods/wine-v1.png",
+    "size": [
+      420,
+      420
+    ],
+    "sourceSize": [
+      1254,
+      1254
+    ],
+    "bytes": 22714,
+    "sha256": "693702a8aad01d61422ee5431429b847fdb03744541d0bef976a2206f37e2bc8"
+  },
+  {
+    "file": "public/art/scenes/bianhe-hero-v1.webp",
+    "source": "design/art-assets/scenes/bianhe-hero-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 339266,
+    "sha256": "02abbaf30851bddc272d6f29527004e7dd4a6ef87bee571fcf4bdad0c1aa8225"
+  },
+  {
+    "file": "public/art/scenes/courtyard-v1.webp",
+    "source": "design/art-assets/scenes/courtyard-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 422488,
+    "sha256": "e8ef64b05ef4e1e6cb61dc9b3826fa85c3d8d6279ec539b0cf20fcaacdef5a7a"
+  },
+  {
+    "file": "public/art/scenes/home-empty-v1.webp",
+    "source": "design/art-assets/scenes/home-empty-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 329680,
+    "sha256": "7e2ca2512771a6281da3aff7a67e3930701244e8bc058a8f69dd4ae7fe918e0a"
+  },
+  {
+    "file": "public/art/scenes/home-mansion-v1.webp",
+    "source": "design/art-assets/scenes/home-mansion-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 373946,
+    "sha256": "3d7d51884196f1e56ec07b375290d30f544a78f89905710dcb9ec95f5804e555"
+  },
+  {
+    "file": "public/art/scenes/home-room-v1.webp",
+    "source": "design/art-assets/scenes/home-room-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 242352,
+    "sha256": "e674d469b3c82659783f769f0d95a79f488917972cbf495ded97ecf45218302d"
+  },
+  {
+    "file": "public/art/scenes/home-yard-v1.webp",
+    "source": "design/art-assets/scenes/home-yard-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 342090,
+    "sha256": "9ffbed512109f947036a60c0bb6dd9914b32970ce074b1f31ab1711b0e9f9d10"
+  },
+  {
+    "file": "public/art/scenes/morning-market-v1.webp",
+    "source": "design/art-assets/scenes/morning-market-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 392476,
+    "sha256": "102d71a6aa62edc02eb581a23f0c58779b9cf7115f284f3fb638c8e1d6a19b35"
+  },
+  {
+    "file": "public/art/scenes/night-market-v1.webp",
+    "source": "design/art-assets/scenes/night-market-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 391536,
+    "sha256": "12fa47cac706fc4ba332839680df6b8aa957bdaa294b20afa51bc9996b3969fc"
+  },
+  {
+    "file": "public/art/scenes/street-v1.webp",
+    "source": "design/art-assets/scenes/street-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 407058,
+    "sha256": "c961e605cc27c22a0c35388a08fbf17b8a8065bae49bcc8945de9d93bc0918f2"
+  },
+  {
+    "file": "public/art/scenes/teahouse-v1.webp",
+    "source": "design/art-assets/scenes/teahouse-v1.png",
+    "size": [
+      1440,
+      960
+    ],
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "bytes": 264652,
+    "sha256": "ec895d9ec066c4ec690d788d0e1fa1889d0e85287b482b8db8479c25b64acd77"
+  }
+]

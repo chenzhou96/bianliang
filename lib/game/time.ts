@@ -38,12 +38,12 @@ export const OPENING_HOURS: Record<Venue, readonly [number, number]> = {
 
 export interface GameClock {
   minute: number;
-  awakeMinutes: number;
+  fatigueMinutes: number;
   sleepDebt: number;
 }
 
 export function newClock(): GameClock {
-  return { minute: TIME_RULES.initialMinute, awakeMinutes: 0, sleepDebt: 0 };
+  return { minute: TIME_RULES.initialMinute, fatigueMinutes: 0, sleepDebt: 0 };
 }
 
 export function validClock(value: unknown): value is GameClock {
@@ -52,8 +52,8 @@ export function validClock(value: unknown): value is GameClock {
   return (
     Number.isSafeInteger(c.minute) &&
     c.minute >= TIME_RULES.initialMinute &&
-    Number.isSafeInteger(c.awakeMinutes) &&
-    c.awakeMinutes >= 0 &&
+    Number.isSafeInteger(c.fatigueMinutes) &&
+    c.fatigueMinutes >= 0 &&
     Number.isFinite(c.sleepDebt) &&
     c.sleepDebt >= 0 &&
     c.sleepDebt <= TIME_RULES.debtLimit
@@ -103,12 +103,14 @@ export function citySchedule(now: number) {
     { at: 360, text: '检查饮食、缴房费、母鸡产蛋，更新行情' },
     { at: 480, text: '市场、招工、学艺与房屋买卖开门' },
     { at: 540, text: '茶馆开门' },
-    { at: 1080, text: '普通市场与招工收工，夜市开张，可在家待客' },
+    {
+      at: 1080,
+      text: '普通市场停止受理新交易、招工收工；夜市开张，可在家待客',
+    },
     { at: 1200, text: '熟客停止收货与接待' },
     { at: 1260, text: '茶馆打烊' },
-    { at: 1320, text: '停止待客，熬夜做事更费体力' },
+    { at: 1320, text: '停止待客，可按身体状况安排休息' },
     { at: 0, text: '夜市与食肆打烊' },
-    { at: 120, text: '继续熬夜开始损害健康，越晚越严重' },
   ]
     .map((item) => ({ ...item, at: nextDailyTime(now, item.at) }))
     .sort((a, b) => a.at - b.at);
@@ -152,24 +154,38 @@ export function canFinishAtVenue(
 
 export function staminaCap(health: number, debt: number) {
   const base = health >= 70 ? 100 : health >= 40 ? 80 : 60;
-  return Math.max(TIME_RULES.minimumStaminaCap, base - debt * 3);
+  return Math.max(
+    TIME_RULES.minimumStaminaCap,
+    base - Math.max(0, debt - 2) * 3,
+  );
 }
 
 /** Evaluate at minute midpoints to integrate linear penalties without action rounding. */
-export function exertionMultiplier(minute: number, awakeMinutes: number) {
-  const t = timeOfDay(minute);
-  const lateHours = t >= 1320 ? (t - 1320) / 60 : t < 360 ? (t + 120) / 60 : 0;
-  const prolonged = Math.min(1, Math.max(0, (awakeMinutes - 1080) / 60) * 0.1);
-  return Math.min(3, 1 + lateHours * 0.1 + prolonged);
+export function fatigueLabel(minutes: number) {
+  return minutes < 840
+    ? '精神充足'
+    : minutes < 960
+      ? '有些疲惫'
+      : minutes < 1200
+        ? '困倦'
+        : '十分困倦';
+}
+
+export function formatDuration(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours}小时${rest ? `${rest}分钟` : ''}` : `${rest}分钟`;
+}
+
+export function exertionMultiplier(_minute: number, fatigueMinutes: number) {
+  return 1 + Math.min(1, Math.max(0, (fatigueMinutes - 1080) / 60) * 0.1);
 }
 
 export function wakingHealthLossPerMinute(
-  minute: number,
-  awakeMinutes: number,
+  _minute: number,
+  fatigueMinutes: number,
 ) {
-  const t = timeOfDay(minute);
-  const lateRate = t >= 120 && t < 360 ? 1 + (t - 120) / 60 : 0;
-  return (lateRate + (awakeMinutes > 1440 ? 2 : 0)) / 60;
+  return fatigueMinutes > 1440 ? 2 / 60 : 0;
 }
 
 export function sleepEfficiency(minute: number) {
@@ -209,7 +225,8 @@ export function projectTime(
   for (let i = 0; i < minutes; i++) {
     const midpoint = next.minute + 0.5;
     if (options.sleeping) {
-      next.sleepDebt = Math.max(0, next.sleepDebt - 1 / 30);
+      next.sleepDebt = Math.max(0, next.sleepDebt - 1 / 60);
+      next.fatigueMinutes = Math.max(0, next.fatigueMinutes - 2);
       recovery +=
         ((options.recoveryForEightHours ?? 0) / 480) *
         sleepEfficiency(midpoint) *
@@ -217,15 +234,15 @@ export function projectTime(
     } else {
       healthLoss += wakingHealthLossPerMinute(
         midpoint,
-        next.awakeMinutes + 0.5,
+        next.fatigueMinutes + 0.5,
       );
-      exertion += exertionMultiplier(midpoint, next.awakeMinutes + 0.5);
-      next.awakeMinutes++;
-      next.sleepDebt = Math.min(12, next.sleepDebt + 1 / 120);
+      exertion += exertionMultiplier(midpoint, next.fatigueMinutes + 0.5);
+      next.fatigueMinutes++;
+      if (next.fatigueMinutes > 960)
+        next.sleepDebt = Math.min(12, next.sleepDebt + 1 / 120);
     }
     next.minute++;
   }
-  if (options.sleeping && minutes >= 240) next.awakeMinutes = 0;
   return {
     clock: next,
     healthLoss,

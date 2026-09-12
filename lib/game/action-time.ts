@@ -1,7 +1,15 @@
 import { lotWeight } from './market-opportunities.ts';
 import { hasFacility } from './home.ts';
 import type { Action, GameState } from './types.ts';
-import { transportQuote, type Venue } from './time.ts';
+import {
+  transportQuote,
+  nextDailyTime,
+  lifeCycle,
+  OPENING_HOURS,
+  canFinishAtVenue,
+  type Venue,
+} from './time.ts';
+import { productionReadyAt } from './production-time.ts';
 
 export function actionTiming(
   s: GameState,
@@ -9,6 +17,16 @@ export function actionTiming(
 ): { minutes: number; venue: Venue } {
   const a = action;
   switch (a.type) {
+    case 'closeDay':
+      return {
+        minutes: closeDayPlan(s, a).finishAt - s.clock.minute,
+        venue: 'home',
+      };
+    case 'waitUntil':
+      return {
+        minutes: waitTargetAt(s, a.target) - s.clock.minute,
+        venue: 'home',
+      };
     case 'reserveRequest':
       return { minutes: 10, venue: 'customer' };
     case 'supplyRequest':
@@ -151,4 +169,106 @@ export function actionTiming(
     default:
       throw Error('未知操作');
   }
+}
+
+/** Trading counters close after accepting paperwork, not after unloading. */
+export function receptionMinutes(action: Action, duration: number) {
+  return ['trade', 'buyLot', 'supplyRequest', 'deliverOrder'].includes(
+    action.type,
+  )
+    ? 10
+    : duration;
+}
+
+export function closeDayPlan(
+  s: GameState,
+  a: Extract<Action, { type: 'closeDay' }>,
+) {
+  const finishAt = nextDailyTime(s.clock.minute, 480);
+  const meal =
+    a.meal && s.life.ateCycle !== lifeCycle(s.clock.minute)
+      ? a.meal
+      : undefined;
+  const mealMinutes = meal ? 30 : 0;
+  const sleeping = Math.min(480, finishAt - s.clock.minute - mealMinutes);
+  if (sleeping < 60)
+    throw Error('距08:00已不足1小时睡眠，请等到08:00或自选睡眠');
+  const idle = finishAt - s.clock.minute - mealMinutes - sleeping;
+  const segments: {
+    kind: 'meal' | 'idle' | 'sleep';
+    startsAt: number;
+    finishAt: number;
+  }[] = [];
+  let at = s.clock.minute;
+  for (const [kind, minutes] of [
+    ['meal', mealMinutes],
+    ['idle', idle],
+    ['sleep', sleeping],
+  ] as const) {
+    if (minutes) segments.push({ kind, startsAt: at, finishAt: at + minutes });
+    at += minutes;
+  }
+  return { finishAt, meal, idle, sleeping, segments };
+}
+
+export function waitTargetAt(
+  s: GameState,
+  target: import('./types.ts').WaitTarget,
+): number {
+  const now = s.clock.minute;
+  let at: number;
+  if (!target || typeof target !== 'object') throw Error('请选择等待目标');
+  switch (target.kind) {
+    case 'morning':
+      at = nextDailyTime(now, 480);
+      break;
+    case 'opening': {
+      if (
+        !['market', 'nightMarket', 'tea', 'customer', 'business'].includes(
+          target.venue,
+        )
+      )
+        throw Error('无效营业场所');
+      at = nextDailyTime(now, OPENING_HOURS[target.venue][0]);
+      break;
+    }
+    case 'production': {
+      const job = s.jobs.find(
+        (j) => j.id === target.jobId && j.status === 'queued',
+      );
+      if (!job) throw Error('该批货没有待完成的生产');
+      const ready = productionReadyAt(s, job);
+      if (ready === null) throw Error('设备停用，生产暂停，无法预计完工');
+      at = ready;
+      break;
+    }
+    case 'delivery': {
+      const order = s.commerce.orders.find(
+        (o) => o.id === target.orderId && o.status === 'accepted',
+      );
+      if (!order) throw Error('没有这张待交付订单');
+      const action: Action = {
+        type: 'deliverOrder',
+        orderId: order.id,
+        transport: target.transport,
+      };
+      const duration = actionTiming(s, action).minutes;
+      at = order.deadlineAt - duration;
+      // Find the latest reception before the contractual delivery deadline.
+      while (
+        at > now &&
+        (!canFinishAtVenue(at, 10, 'customer') ||
+          (target.transport === 'porter' &&
+            !canFinishAtVenue(at, 10, 'porter')))
+      )
+        at--;
+      break;
+    }
+    default:
+      throw Error('未知等待目标');
+  }
+  if (!Number.isSafeInteger(at) || at <= now)
+    throw Error('该目标已到达，请直接办理');
+  if (at - now > 1440) throw Error('目标超过24小时，请稍后再安排');
+  return at;
 }

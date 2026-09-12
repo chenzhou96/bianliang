@@ -15,17 +15,17 @@
 
 Use Node.js 22.13+ and install dependencies with `npm ci`.
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Start development at `http://127.0.0.1:4173`. |
-| `npm run build` / `npm start` | Build production assets / serve the built game locally. |
-| `npm run typecheck` | Check TypeScript without emitting code. |
-| `npm run lint` | Run Oxlint on app, game, tests, and scripts. |
-| `npm run format` | Apply Oxfmt formatting. |
-| `npm test` | Run Node rule and WebMCP regression tests. |
-| `npm run simulate` | Compare seeded strategies and long-term stability. |
-| `npm run test:content` | Generate intelligence-content review samples. |
-| `npm run test:browser` | Run desktop layout and gameplay flows; requires installed Chrome and a running local server. |
+| Command                       | Purpose                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `npm run dev`                 | Start development at `http://127.0.0.1:4173`.                                                |
+| `npm run build` / `npm start` | Build production assets / serve the built game locally.                                      |
+| `npm run typecheck`           | Check TypeScript without emitting code.                                                      |
+| `npm run lint`                | Run Oxlint on app, game, tests, and scripts.                                                 |
+| `npm run format`              | Apply Oxfmt formatting.                                                                      |
+| `npm test`                    | Run Node rule and WebMCP regression tests.                                                   |
+| `npm run simulate`            | Compare seeded strategies and long-term stability.                                           |
+| `npm run test:content`        | Generate intelligence-content review samples.                                                |
+| `npm run test:browser`        | Run desktop layout and gameplay flows; requires installed Chrome and a running local server. |
 
 ## Coding Style & Naming Conventions
 
@@ -41,4 +41,4 @@ History mixes Chinese summaries and English `feat:` messages; no uniform prefix 
 
 ## Game Architecture & Persistence
 
-Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v3`. Old v1/v2 saves remain exportable but are not migrated or loaded; never overwrite their keys. Expose only player-known information through WebMCP.
+Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4`. Old v1/v2/v3 saves remain exportable but are not migrated or loaded; never overwrite their keys. Expose only player-known information through WebMCP.

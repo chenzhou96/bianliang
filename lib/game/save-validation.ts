@@ -14,7 +14,7 @@ const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 const unique = (values: unknown[]) => new Set(values).size === values.length;
 
-/** Validate v3-only state before allowing its values into game calculations. */
+/** Validate v4-only state before allowing its values into game calculations. */
 export function validContinuousSave(s: GameState): boolean {
   try {
     if (

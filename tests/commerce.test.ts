@@ -170,7 +170,7 @@ void test('return, death and cancellation settle active deposits without debt or
   assert.equal(returned.ledger.depositLosses, 18);
   const dying = structuredClone(s);
   dying.health = 1;
-  dying.clock.awakeMinutes = 1500;
+  dying.clock.fatigueMinutes = 1500;
   const died = act(dying, { type: 'wait', minutes: 60 });
   assert.equal(died.ending, 'death');
   assert.equal(died.ledger.depositLosses, 18);

@@ -364,7 +364,18 @@ export interface GameState {
   };
 }
 
+export type WaitTarget =
+  | {
+      kind: 'opening';
+      venue: 'market' | 'nightMarket' | 'tea' | 'customer' | 'business';
+    }
+  | { kind: 'morning' }
+  | { kind: 'production'; jobId: number }
+  | { kind: 'delivery'; orderId: number; transport?: Transport };
+
 export type Action =
+  | { type: 'closeDay'; bed: Bed; meal?: Exclude<Meal, 'none'> }
+  | { type: 'waitUntil'; target: WaitTarget }
   | { type: 'buyLot'; lotId: string; transport?: Transport }
   | {
       type: 'supplyRequest';

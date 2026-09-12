@@ -50,7 +50,7 @@ export function PersistentAssets({
                 key={g}
                 title={`${GOODS[g].name} ${number(quantity(s, g))}${GOODS[g].unit}`}
               >
-                <span>{GOODS[g].name}</span>
+                <span className="asset-good-name">{GOODS[g].name}</span>
                 <b>{number(quantity(s, g))}</b>
               </div>
             ))}

@@ -55,7 +55,7 @@ await test('已结算的每日时点不会再次返回，跨日寻找下一时�
 });
 
 await test('时间预览纯净且跨午夜拆分不会改变清醒惩罚', () => {
-  const clock = { minute: 1300, awakeMinutes: 1200, sleepDebt: 4 };
+  const clock = { minute: 1300, fatigueMinutes: 1200, sleepDebt: 4 };
   const before = structuredClone(clock);
   const whole = projectTime(clock, 500);
   let split = clock;
@@ -71,37 +71,40 @@ await test('时间预览纯净且跨午夜拆分不会改变清醒惩罚', () =>
   assert.deepEqual(split, whole.clock);
   near(health, whole.healthLoss);
   near(exertion / 500, whole.averageExertion);
-  assert.ok(whole.healthLoss > 12);
+  near(whole.healthLoss, 260 / 30);
 });
 
-await test('02至06健康损失递增，白天连续清醒超过24小时仍受罚', () => {
+await test('夜间不按钟点惩罚，疲劳负荷超过24小时才损害健康', () => {
   const first = projectTime(
-    { minute: 1560, awakeMinutes: 0, sleepDebt: 0 },
+    { minute: 1560, fatigueMinutes: 0, sleepDebt: 0 },
     60,
   );
-  const last = projectTime({ minute: 1740, awakeMinutes: 0, sleepDebt: 0 }, 60);
-  near(first.healthLoss, 1.5);
-  near(last.healthLoss, 4.5);
+  const last = projectTime(
+    { minute: 1740, fatigueMinutes: 0, sleepDebt: 0 },
+    60,
+  );
+  near(first.healthLoss, 0);
+  near(last.healthLoss, 0);
   const day = projectTime(
-    { minute: 480, awakeMinutes: 1440, sleepDebt: 12 },
+    { minute: 480, fatigueMinutes: 1440, sleepDebt: 12 },
     60,
   );
   near(day.healthLoss, 2);
 });
 
-await test('充足睡眠清除清醒计数，短睡不重置；日间睡眠效率较低', () => {
-  const clock = { minute: 1320, awakeMinutes: 1000, sleepDebt: 8 };
+await test('睡眠按分钟消除负荷与睡眠债；日间恢复效率较低', () => {
+  const clock = { minute: 1320, fatigueMinutes: 1000, sleepDebt: 8 };
   const night = projectTime(clock, 480, {
     sleeping: true,
     recoveryForEightHours: 50,
   });
   near(night.recovery, 50);
   near(night.clock.sleepDebt, 0);
-  assert.equal(night.clock.awakeMinutes, 0);
+  assert.equal(night.clock.fatigueMinutes, 40);
   assert.equal(night.healthLoss, 0);
   const short = projectTime(clock, 60, { sleeping: true });
-  near(short.clock.sleepDebt, 6);
-  assert.equal(short.clock.awakeMinutes, 1000);
+  near(short.clock.sleepDebt, 7);
+  assert.equal(short.clock.fatigueMinutes, 880);
   const day = projectTime({ ...clock, minute: 480 }, 480, {
     sleeping: true,
     recoveryForEightHours: 50,
@@ -117,9 +120,9 @@ await test('充足睡眠清除清醒计数，短睡不重置；日间睡眠效�
 });
 
 await test('睡眠不足降低体力上限但不使零体力玩家失去恢复空间', () => {
-  near(staminaCap(100, 4), 88);
+  near(staminaCap(100, 4), 94);
   near(staminaCap(30, 12), 30);
-  near(projectTime(newClock(), 1440).clock.sleepDebt, 12);
+  near(projectTime(newClock(), 1440).clock.sleepDebt, 4);
   assert.throws(() => projectTime(newClock(), 1441));
   assert.throws(() => projectTime(newClock(), 0, { sleeping: true }));
   assert.throws(() => projectTime(newClock(), 601, { sleeping: true }));
@@ -156,7 +159,7 @@ await test('时钟读取拒绝损坏数据与不可能的时间', () => {
     {},
     { ...newClock(), minute: 1 },
     { ...newClock(), sleepDebt: NaN },
-    { ...newClock(), awakeMinutes: -1 },
+    { ...newClock(), fatigueMinutes: -1 },
   ])
     assert.equal(validClock(value), false);
 });

@@ -1,3 +1,6 @@
+'use client';
+import Image from 'next/image';
+import { useState } from 'react';
 import type {
   Good,
   EquipmentKind,
@@ -50,29 +53,47 @@ export function GoodIcon({
   good: Good;
   large?: boolean;
 }) {
+  const [failed, setFailed] = useState<Good | null>(null);
   return (
-    <svg
-      className={`good-icon ${large ? 'large' : ''}`}
-      viewBox="0 0 32 32"
+    <span
+      className={`good-art good-icon ${large ? 'large' : ''}`}
       aria-hidden="true"
-      focusable="false"
     >
-      <circle
-        cx="16"
-        cy="16"
-        r="15"
-        fill="var(--icon-wash, #eee4cf)"
-        stroke="none"
-      />
-      <path
-        d={paths[good]}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      <svg
+        className="good-art-fallback"
+        viewBox="0 0 32 32"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <circle
+          cx="16"
+          cy="16"
+          r="15"
+          fill="var(--icon-wash, #eee4cf)"
+          stroke="none"
+        />
+        <path
+          d={paths[good]}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      {failed !== good && (
+        <Image
+          unoptimized
+          key={good}
+          src={`/art/goods/${good}-${large ? 'v1' : 'thumb'}.webp`}
+          width={large ? 420 : 96}
+          height={large ? 420 : 96}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(good)}
+        />
+      )}
+    </span>
   );
 }
 

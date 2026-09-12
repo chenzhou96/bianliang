@@ -27,7 +27,7 @@ function night(s: GameState) {
   return closeDay(s);
 }
 
-void test('v3 content and rules expose the planned long-game surface', () => {
+void test('v4 content and rules expose the planned long-game surface', () => {
   assert.equal(GOOD_IDS.length, 17);
   assert.equal(CONTENT_INFO.length, 120);
   assert.equal(INFO_TEMPLATES.length, 120);
@@ -119,15 +119,16 @@ void test('time limits work and rest while lessons and treatment keep cycle limi
   assert(dispatch(s, { type: 'learn', skill: 'textile' }).error);
   s.health = 35;
   s.stamina = 80;
-  assert(staminaMax(s) < 60 && staminaMax(s) >= 30);
+  assert.equal(staminaMax(s), 60);
   assert(dispatch(s, { type: 'heavy' }).error);
   setDay(s, 2);
   s = act(s, { type: 'treat', mode: 'slow' });
   assert.equal(s.daily.treatment, 1);
   assert(dispatch(s, { type: 'treat', mode: 'slow' }).error);
+  s.stamina = 10;
   s = act(s, { type: 'rest' });
   s = act(s, { type: 'rest' });
-  assert(s.clock.sleepDebt > 0);
+  assert.equal(s.clock.sleepDebt, 0);
 });
 
 void test('housing downgrade never destroys assets and ownership sale is fixed-price', () => {

@@ -16,7 +16,7 @@ const nav = (name) =>
     .getByRole('button', { name, exact: true })
     .click();
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v4')));
 async function check(label, mobile) {
   const result = await measureLayout(page, { allowVertical: mobile });
   // Mobile pages intentionally scroll vertically; horizontal overflow is never allowed.
@@ -41,7 +41,7 @@ try {
     await page.reload({ waitUntil: 'networkidle' });
     await button('走进汴梁 · 3000文').click();
     await nav('住宅');
-    await button('房屋').click();
+    // 房屋 is available on the same workspace.
     await page.getByRole('button', { name: /租赁小屋 接手/ }).click();
     await button('租下').click();
     await nav('市场');
@@ -84,25 +84,23 @@ try {
     assert.equal((await read()).clock.minute, opening.clock.minute + 120);
     await button('回家安排饭食与鸡群').click();
     const meal = page.locator('.life-section').filter({
-      has: page.getByRole('heading', { name: '饭食', exact: true }),
+      has: page.getByRole('heading', { name: '饭食与短休', exact: true }),
     });
     assert.equal(await meal.getByRole('checkbox').count(), 0);
-    if (width >= 700) {
-      const aligned = await meal.evaluate((el) => {
-        const select = el.querySelector('select').getBoundingClientRect();
-        const button = el.querySelector('.btn').getBoundingClientRect();
-        return (
-          Math.abs(select.y - button.y) < 1 &&
-          Math.abs(select.height - button.height) < 1
-        );
-      });
-      assert.ok(aligned, 'Meal selector and action must share top and height');
-    }
+    const mealBox = await meal
+      .getByRole('button', { name: '用主餐 · 30分钟' })
+      .boundingBox();
+    if (width >= 700)
+      assert.ok(
+        mealBox && mealBox.y + mealBox.height < height,
+        'Daily meal is visible without scrolling',
+      );
+    await page.getByText(/^鸡群 ·/).click();
     const auto = page.getByLabel('每天清晨05:30，用存粮自动喂鸡');
     await auto.check();
     assert.equal((await read()).life.autoFeed, true);
     assert.match(
-      await page.locator('.housing-body:visible').innerText(),
+      await page.locator('.art-home-layout').innerText(),
       /明天05:30/,
     );
     await check(`${width}x${height}-home`, width < 700);

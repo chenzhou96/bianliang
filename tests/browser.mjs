@@ -14,13 +14,13 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const button = (name) => page.getByRole('button', { name, exact: true });
 const read = () =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v3')));
+  page.evaluate(() => JSON.parse(localStorage.getItem('bianliang-save-v4')));
 const load = async (s) => {
   assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     for (const key of Object.keys(localStorage))
       if (key.startsWith('bianliang-ui:')) localStorage.removeItem(key);
-    localStorage.setItem('bianliang-save-v3', JSON.stringify(s));
+    localStorage.setItem('bianliang-save-v4', JSON.stringify(s));
   }, s);
   await page.reload();
   await page.getByRole('button', { name: /继续第/ }).click();
@@ -69,10 +69,18 @@ try {
   const downloadPromise = page.waitForEvent('download');
   await button('导出存档').click();
   assert(
-    (await downloadPromise).suggestedFilename().includes('bianliang-save-v3'),
+    (await downloadPromise).suggestedFilename().includes('bianliang-save-v4'),
   );
-  await button('等待30分钟').click();
-  await button('等待30分钟').click();
+  await page.locator('.footer-wait').evaluate((el) => (el.open = true));
+  await page
+    .locator('.footer-wait')
+    .getByRole('button', { name: '等待30分钟', exact: true })
+    .click();
+  await page.locator('.footer-wait').evaluate((el) => (el.open = true));
+  await page
+    .locator('.footer-wait')
+    .getByRole('button', { name: '等待30分钟', exact: true })
+    .click();
   await button('情报').click();
   await button('茶馆听消息 · 8文').click();
   const tea = await read();
@@ -172,7 +180,6 @@ try {
   assert.match(await page.locator('.status-effects').innerText(), /异乡人/);
   assert.match(await page.locator('.detail').innerText(), /2份 \/ 0文/);
   for (const category of ['在制品', '设备', '房产']) {
-    await button(category).click();
     assert.match(
       await page.locator('.list-column').innerText(),
       new RegExp('暂无' + category),
@@ -200,7 +207,14 @@ try {
   await page.keyboard.press('Escape');
   await button('资产').click();
   for (const category of ['设备', '房产']) {
-    await button(category).click();
+    await page
+      .locator('.inventory-group')
+      .filter({
+        has: page.getByRole('heading', { name: category, exact: true }),
+      })
+      .getByRole('button')
+      .first()
+      .click();
     assert.match(await page.locator('.detail').innerText(), /回收|维护/);
     await layout('资产持有清单-' + category);
   }
@@ -226,7 +240,12 @@ try {
   ];
   await load(inProgress);
   await button('资产').click();
-  await button('在制品').click();
+  await page
+    .locator('.inventory-group')
+    .filter({ has: page.getByRole('heading', { name: '在制品', exact: true }) })
+    .getByRole('button')
+    .first()
+    .click();
   assert.match(await page.locator('.detail').innerText(), /投入成本240文/);
   assert.match(await page.locator('.detail').innerText(), /正常加工/);
   await layout('资产在制品');
@@ -273,15 +292,25 @@ try {
         await layout(`${w}x${h}-${name}-${tab}`);
       }
       await button('生产').click();
-      await button('设备').click();
+      await page
+        .locator('.inventory-group')
+        .filter({
+          has: page.getByRole('heading', { name: '设备', exact: true }),
+        })
+        .getByRole('button')
+        .first()
+        .click();
       await layout(`${w}x${h}-${name}-设备`);
     }
     const evening = structuredClone(developed);
     setDay(evening, 100, 1320);
     await load(evening);
     await button('住宅').click();
-    await button('生活').click();
+    // 生活 is available on the same workspace.
     await layout(`${w}x${h}-夜间生活`);
+    await page
+      .getByText('午休、自选睡眠与等待', { exact: true })
+      .evaluate((el) => (el.parentElement.open = true));
     await page.getByLabel('睡眠小时').fill('11');
     assert(
       await page.getByRole('button', { name: /^入睡 · 醒于/ }).isDisabled(),
@@ -318,9 +347,9 @@ try {
     await layout(`${w}x${h}-结局`);
     await load({ ...developed, cash: 30000 });
     await layout(`${w}x${h}-归航可用`);
-    await button('价格记录').click();
+    // 价格记录 is available on the same workspace.
     await layout(`${w}x${h}-行情历史`);
-    await button('交易详情').click();
+    // 交易详情 is available on the same workspace.
     await page
       .locator('.item-list')
       .evaluate((e) => (e.scrollTop = e.scrollHeight));
@@ -348,7 +377,7 @@ try {
   assert(await button('开工').isDisabled());
   const legacy = { ...original, version: 2 };
   await page.evaluate(
-    (raw) => localStorage.setItem('bianliang-save-v3', raw),
+    (raw) => localStorage.setItem('bianliang-save-v4', raw),
     JSON.stringify(legacy),
   );
   await page.reload();
@@ -356,13 +385,13 @@ try {
   assert.deepEqual(await read(), legacy);
   await layout('incompatible-save-preserved');
   await page.evaluate(() =>
-    localStorage.setItem('bianliang-save-v3', '{"broken":true}'),
+    localStorage.setItem('bianliang-save-v4', '{"broken":true}'),
   );
   await page.reload();
   await page.getByText(/存档损坏或版本不兼容/).waitFor();
   await button('挑战三万文').click();
   assert.equal(
-    await page.evaluate(() => localStorage.getItem('bianliang-save-v3')),
+    await page.evaluate(() => localStorage.getItem('bianliang-save-v4')),
     '{"broken":true}',
   );
   await button('保留当前旅程').click();
@@ -390,5 +419,7 @@ try {
   );
   throw e;
 } finally {
+  await page.context().close();
   await browser.close();
+  console.log('Browser cleanup complete');
 }

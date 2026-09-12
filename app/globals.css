@@ -1729,3 +1729,60 @@ input[type='number'] {
 .life-section .actions > input[type='number'] {
   max-width: none;
 }
+
+/* Primary daily actions stay above optional controls. */
+.life-primary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.life-primary .life-section {
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.life-primary .life-section h3 {
+  margin-bottom: 0;
+}
+.life-primary select {
+  width: 100%;
+  min-height: 36px;
+}
+.life-detail > p {
+  margin: 4px 0 8px;
+}
+.life-secondary {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.life-secondary summary,
+.footer-wait summary {
+  cursor: pointer;
+}
+.life-secondary .actions {
+  margin-top: 8px;
+}
+.city-clock-note {
+  flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+  .life-primary {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (min-width: 1051px) {
+  .city-clock-note {
+    flex-wrap: nowrap;
+  }
+  .city-clock-note > span {
+    min-width: 0;
+  }
+  .city-clock-note > span:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

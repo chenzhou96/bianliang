@@ -1,14 +1,19 @@
 import { setDay } from './helpers.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dispatch, maybeEncounter, newGame } from '../lib/game/engine.ts';
+import {
+  dispatch,
+  maybeEncounter,
+  newGame,
+  maximumTrade,
+} from '../lib/game/engine.ts';
 import {
   registerGameTools,
   publicState,
   type ModelContext,
 } from '../lib/game/webmcp.ts';
 
-void test('optional tools expose only known v3 state and reject stale actions', async () => {
+void test('optional tools expose only known v4 state and reject stale actions', async () => {
   let s = newGame(123);
   setDay(s, 2, 540);
   maybeEncounter(s, true);
@@ -90,6 +95,18 @@ void test('public action previews share maxima and confirmation without mutating
     action: { type: 'trade', good: 'grain', side: 'buy', quantity: 1 },
   })) as { maximum: number; revision: number };
   assert(preview.maximum > 0);
+  const porter = (await registered
+    .get('preview_bianliang_action')!
+    .execute({
+      action: {
+        type: 'trade',
+        good: 'grain',
+        side: 'buy',
+        quantity: 1,
+        transport: 'porter',
+      },
+    })) as { maximum: number };
+  assert.equal(porter.maximum, maximumTrade(s, 'grain', 'buy', 'porter'));
   assert.equal(preview.revision, s.revision);
   assert.deepEqual(s, original);
   assert(publicState(s).todayTasks);

@@ -12,11 +12,13 @@
     "typecheck": "tsc --noEmit",
     "build": "node --import ./scripts/build-shutdown.mjs node_modules/vinext/dist/cli.js build",
     "start": "node scripts/serve.mjs",
-    "lint": "oxlint app lib/game tests scripts components/game-commerce.tsx components/game-feedback.tsx components/game-icons.tsx components/game-shell.tsx hooks/use-workspace-value.ts",
+    "lint": "oxlint app lib/game tests scripts components/game-commerce.tsx components/game-feedback.tsx components/game-icons.tsx components/game-shell.tsx components/game-art.tsx components/game-hint.tsx hooks/use-workspace-value.ts",
     "format": "oxfmt",
-    "test:browser": "node tests/browser.mjs && node tests/browser-flow.mjs && node tests/browser-ux.mjs && node tests/browser-commerce.mjs && node tests/browser-continuous.mjs && node tests/browser-street.mjs",
+    "test:browser": "node tests/browser.mjs && node tests/browser-flow.mjs && node tests/browser-ux.mjs && node tests/browser-commerce.mjs && node tests/browser-continuous.mjs && node tests/browser-street.mjs && node tests/browser-time-experience.mjs",
+    "test:art": "node tests/browser-art.mjs",
     "test:content": "node tests/content-review.ts",
-    "simulate:legacy": "node tests/simulate.ts"
+    "simulate:legacy": "node tests/simulate.ts",
+    "test:workbench": "node tests/browser-workbench.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

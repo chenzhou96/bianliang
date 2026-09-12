@@ -21,7 +21,7 @@ await test('跨午夜提醒明确今天明天，时辰表始终指向未来一�
   );
   for (const now of [480, 1080, 1440, 1800]) {
     const schedule = citySchedule(now);
-    assert.equal(schedule.length, 10);
+    assert.equal(schedule.length, 9);
     assert.ok(schedule.every((item) => item.at > now && item.at <= now + 1440));
     assert.ok(schedule.every((item, i) => !i || item.at > schedule[i - 1].at));
   }

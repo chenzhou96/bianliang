@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './art.css';
+import './workbench.css';
 export const metadata: Metadata = {
   icons: { icon: '/favicon.svg' },
   title: '汴梁归途 · 长期经营手记',

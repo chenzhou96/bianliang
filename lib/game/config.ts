@@ -8,7 +8,7 @@ import type {
 } from './types.ts';
 
 export const RULES = {
-  version: '3.0-continuous-time',
+  version: '4.0-time-experience',
   initialCash: 800,
   tradeStaminaPerUnit: 1,
   shortWage: 25,

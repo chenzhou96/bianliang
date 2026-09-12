@@ -1,0 +1,480 @@
+/* Illustrated game surfaces; data and actions remain ordinary HTML. */
+.game {
+  --paper: #fbf7ee;
+  --ink: #283d39;
+  --line: #d5c9b0;
+  --wash: #ecebdc;
+  background: #eee8d9;
+  background-image: radial-gradient(
+    ellipse at 50% 0,
+    #fffdf5 0,
+    transparent 72%
+  );
+}
+.game .masthead {
+  border-bottom: 1px solid #c6b38a;
+}
+.game .brand {
+  font-family: 'Songti SC', 'STSong', serif;
+  letter-spacing: 0.06em;
+}
+.game .seal {
+  background: #9f4938;
+  box-shadow: inset 0 0 0 2px #b97762;
+}
+.game .status {
+  background: #faf7edf2;
+  border-block: 1px solid #d9cfbb;
+}
+.game .asset-rail,
+.game .record-rail {
+  border-color: #d4c5aa;
+  background: #fbf7ee;
+}
+.game .rail-heading {
+  background: #eee6d5;
+  border-bottom: 1px solid #d4c5aa;
+}
+.game .record-rail {
+  background-image: repeating-linear-gradient(
+    transparent 0 27px,
+    #cdbd9c24 27px 28px
+  );
+}
+.game .panel,
+.game .detail {
+  border-color: #d5c9b0;
+}
+.game .list-item {
+  background: #fcf8ef;
+}
+.game .list-item.selected {
+  background: #e2e8da;
+  border-color: #4c6e60;
+  box-shadow: inset 3px 0 #365e52;
+}
+.game .workspaces > button.active {
+  color: #fdf7e8;
+  background: #345f55;
+  border-radius: 5px 5px 0 0;
+  border-bottom-color: #ba9760;
+}
+.game .panel h1,
+.game .scene-caption > strong {
+  font-family: 'Songti SC', 'STSong', serif;
+}
+.game button:focus-visible {
+  outline: 3px solid #b37b38;
+  outline-offset: 3px;
+}
+.opening {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 620px;
+  background: #e7dfcb;
+}
+.opening-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -2;
+}
+.opening::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    90deg,
+    #fcf5e6f5 5%,
+    #fcf5e6dc 33%,
+    #fcf5e63d 65%,
+    transparent
+  );
+}
+.opening > p,
+.opening > h1,
+.opening > .watch,
+.opening > .actions {
+  position: relative;
+  max-width: 600px;
+}
+.work-column .illustrated-panel > .panel-head {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 100px;
+  padding: 18px;
+  border-radius: 4px;
+  background: #efe5d0;
+  align-items: center;
+}
+.panel-landscape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 58%;
+  z-index: -2;
+}
+.illustrated-panel > .panel-head::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(90deg, #fbf3e2f5, #fbf3e2d9 38%, #fbf3e255);
+}
+.work-column .illustrated-panel .panel-head p {
+  max-width: 330px;
+  color: #2f4239;
+  background: #fff8e5de;
+  padding: 7px 10px;
+  border-radius: 3px;
+}
+.scene-art {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid #cbbb9c;
+  border-radius: 5px;
+  background: #e8dfca;
+  min-height: 230px;
+}
+.scene-art > img {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  object-fit: cover;
+}
+.scene-caption {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 24px 18px 16px;
+  background: linear-gradient(transparent, #203b32ed 40%);
+  color: #fff8e6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scene-caption > strong {
+  font-size: 26px;
+  font-weight: 500;
+}
+.scene-caption > span {
+  font-size: 13px;
+}
+.scene-kicker {
+  letter-spacing: 0.14em;
+}
+.street-scene {
+  flex: none;
+  height: 300px;
+  margin-bottom: 14px;
+}
+.scene-destinations {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 8px;
+}
+.scene-destinations button {
+  min-height: 52px;
+  padding: 7px;
+  border: 1px solid #e2c99099;
+  background: #fbf3e9ed;
+  color: #294c40;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.scene-destinations small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 3px;
+}
+.equipment-art {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid #d6c6a9;
+  border-radius: 5px;
+  background: #f5ecd9;
+}
+.equipment-art img {
+  width: 128px;
+  height: 128px;
+  object-fit: contain;
+  mix-blend-mode: multiply;
+}
+.equipment-art figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.equipment-art figcaption strong {
+  font:
+    24px 'Songti SC',
+    'STSong',
+    serif;
+}
+.equipment-art figcaption span {
+  font-size: 13px;
+}
+.equipment-art.compact {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  flex: none;
+}
+.equipment-art.compact img {
+  width: 56px;
+  height: 56px;
+}
+.working-label::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #618444;
+  animation: work-glow 2s ease-in-out infinite;
+}
+@keyframes work-glow {
+  50% {
+    opacity: 0.35;
+  }
+}
+.work-column .art-home-layout:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 14px;
+  overflow: hidden;
+}
+.home-estate {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #d4c5aa;
+  background: #f6f0e2;
+  border-radius: 5px;
+}
+.home-estate .scene-art {
+  min-height: 260px;
+  flex: 1 0 260px;
+  border: 0;
+  border-radius: 0;
+}
+.estate-inventory {
+  padding: 12px;
+}
+.estate-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+.estate-equipment {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+.estate-equipment > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #ece3d0;
+  padding: 5px;
+  border-radius: 4px;
+}
+.estate-equipment span {
+  font-size: 11px;
+  text-align: center;
+}
+.estate-equipment p {
+  grid-column: 1/-1;
+}
+.estate-facilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.estate-facilities span {
+  padding: 4px 7px;
+  background: #dfe5d7;
+  font-size: 12px;
+}
+.home-controls {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.work-column .home-controls .life-detail {
+  overflow: visible;
+}
+.home-controls .life-primary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.intel-panel .detail {
+  background: #fffaf0;
+}
+.intel-panel .text-pages {
+  border-left: 3px solid #b7975a;
+  padding-left: 14px;
+}
+.game[data-period='late'] .scene-art > img {
+  filter: brightness(0.62) saturate(0.7) hue-rotate(8deg);
+}
+.game[data-period='dusk'] .scene-art > img {
+  filter: sepia(0.18) brightness(0.85);
+}
+.reduce-motion .working-label::before {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .working-label::before {
+    animation: none;
+  }
+}
+@media (max-width: 1200px) {
+  .scene-destinations {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1050px) {
+  .work-column .art-home-layout:not([hidden]) {
+    display: block;
+    overflow: visible;
+  }
+  .home-estate {
+    margin-bottom: 12px;
+  }
+  .home-estate .scene-art {
+    flex-basis: 230px;
+  }
+  .home-controls {
+    overflow: visible;
+  }
+}
+@media (max-width: 700px) {
+  .home-controls .life-primary {
+    grid-template-columns: 1fr;
+  }
+  .opening {
+    min-height: 580px;
+  }
+  .opening::before {
+    background: linear-gradient(90deg, #fcf5e6ee, #fcf5e699);
+  }
+  .work-column .illustrated-panel > .panel-head {
+    min-height: 118px;
+    padding: 12px;
+  }
+  .work-column .illustrated-panel .panel-head p {
+    margin: 0;
+    font-size: 12px;
+  }
+  .equipment-art img {
+    width: 100px;
+    height: 100px;
+  }
+  .scene-caption {
+    padding: 30px 12px 12px;
+  }
+  .scene-caption > strong {
+    font-size: 23px;
+  }
+  .street-scene {
+    height: 310px;
+  }
+}
+.good-art {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #f6ecd8;
+}
+.good-art > svg {
+  width: 100%;
+  height: 100%;
+}
+.good-art > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.market-panel .list-item .good-art {
+  width: 42px;
+  height: 42px;
+}
+.market-panel .market-detail .detail-head .good-art {
+  width: 104px;
+  height: 104px;
+  border: 1px solid #d7c6a5;
+}
+.asset-good-name {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  min-width: 0;
+}
+.asset-good-name .good-art {
+  width: 19px;
+  height: 19px;
+}
+.speaker-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.speaker-seal {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #36594b;
+  color: #fff4d9;
+  font:
+    23px 'Songti SC',
+    serif;
+  flex: none;
+}
+@media (max-width: 700px) {
+  .market-panel .market-detail .detail-head .good-art {
+    width: 72px;
+    height: 72px;
+  }
+}
+
+.game[data-period='evening'] .scene-art > img {
+  filter: brightness(0.72) saturate(0.8);
+}
+.game[data-period='dawn'] .scene-art > img {
+  filter: sepia(0.12) brightness(0.9);
+}
+.work-column .market-detail > .actions,
+.work-column .market-detail > .market-trade-actions,
+.work-column .production-detail .production-actions {
+  position: sticky;
+  bottom: -12px;
+  z-index: 3;
+  background: #fbf7ee;
+  padding: 10px 0;
+  border-top: 1px solid #cbbb9c;
+  box-shadow: 0 -8px 12px #fbf7eed9;
+}
