@@ -1,5 +1,7 @@
 # 汴梁归途 · 连续时间经营版
 
+离线分发版：解压后在 macOS 双击“汴梁归途.app”，在 Windows 11 双击“开始游戏.cmd”。已内置双架构运行环境，无需安装开发依赖。详见[分发说明](docs/distribution/README.md)、[玩家说明](docs/distribution/PLAYER_GUIDE.txt)与[宣传海报](design/promotion/bianliang-poster-v1.png)。
+
 八百文开局，在汴梁买卖货物、打工、学艺、生产、养鸡与安家。可选 **3,000文**或 **30,000文**归航目标；没有经营天数上限，达标后自行决定何时归航。健康归零则旅程结束。
 
 界面已接入宋画淡彩场景、商品与设备插画，以及随住房等级变化的生活空间。原图和提示词见 [美术素材库](design/art-assets/README.md)，交付范围见 [美术版实施清单](docs/plans/ART_INTERFACE_PLAN.md)。
@@ -63,7 +65,7 @@ npm start
 | `npm run test:browser`               | 真实Chrome布局与玩法检查；需先启动本机服务      |
 | `npm run simulate`                   | 连续时间策略模拟，默认七种策略、各30种子、100日 |
 | `npm run simulate:stories`           | 故事参与程度对照，三种策略各30种子、100日       |
-| `npm run simulate:market` | 三种行情手段各100种子的单次持仓实验 |
+| `npm run simulate:market`            | 三种行情手段各100种子的单次持仓实验             |
 | `npm run test:content`               | 情报内容抽样与去重检查                          |
 | `npm run format`                     | 格式化                                          |
 
@@ -77,7 +79,7 @@ npm start
 | `lib/game/`              | 规则、时钟、结算、市场、住宅、存档和WebMCP |
 | `components/`、`hooks/`  | 共用界面、经营反馈与页面偏好               |
 | `tests/`                 | 规则回归、模拟、内容与浏览器检查           |
-| `scripts/`               | 构建、本机服务与开发启动辅助脚本                     |
+| `scripts/`               | 构建、本机服务与开发启动辅助脚本           |
 | [docs/](docs/README.md)  | 当前计划、功能验收与历史归档               |
 | `design/layout-options/` | 布局设计说明与生成脚本                     |
 | [AGENTS.md](AGENTS.md)   | 开发与提交约定                             |

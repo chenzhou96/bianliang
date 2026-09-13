@@ -20,7 +20,9 @@
     "simulate:legacy": "node tests/simulate.ts",
     "test:workbench": "node tests/browser-workbench.mjs",
     "simulate:stories": "node tests/simulate-stories.ts",
-    "simulate:market": "node tests/simulate-market-control.ts"
+    "simulate:market": "node tests/simulate-market-control.ts",
+    "package:desktop": "python3 scripts/distribution/build.py",
+    "test:distribution": "node tests/distribution.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

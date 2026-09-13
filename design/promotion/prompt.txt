@@ -1,0 +1,25 @@
+Use case: ads-marketing
+Asset type: finished Chinese game promotional poster, portrait 2048x3072, high-resolution, readable on phones and printable.
+Primary request: Create a polished promotional poster for the browser management game 《汴梁归途》 introducing its actual gameplay.
+Style: Song-dynasty handscroll painting on warm ivory paper, elegant fine ink lines and light mineral watercolors. Muted celadon, tea brown, pale ochre, small cinnabar seals. Calm but inviting. Refined Chinese editorial typography with a large expressive brush title and exceptionally clear small print.
+Scene: a bustling Northern Song riverside market at Bianliang: timber shops, a graceful bridge and moored cargo boats; a plainly dressed traveling merchant with an account book and strings of copper cash, tea baskets, cloth bolts, recognizably torn wheat flatbreads (NOT eggs), a couple of hens near a courtyard. Small workshop and warm lanterns suggest daily life. No modern objects, fantasy armor, Qing clothing or pigtails. Main scene occupies the middle, generous clean paper above for title and below for four readable gameplay introductions. Avoid UI screenshots, fake QR codes, logos, watermarks, invented awards, web addresses.
+Layout: premium cohesive poster, strong title hierarchy, spacious lower two-column four-block gameplay typography integrated with small ink vignettes. All text fully inside generous margins. Decorative seal may contain only “经营手记”. Only the exact text listed below; no other tiny filler text.
+Text (verbatim, Chinese must be legible and correct):
+汴梁归途
+八百文起家，在宋代市井经营人生
+开局800文 · 自选3000文或30000文归航目标
+
+市井买卖
+买卖同价，看准涨跌；主动奔走，影响行情。
+
+学艺兴业
+磨面炊饼，纺织酿造；养鸡置业，积攒家当。
+
+烟火日常
+备饭休息，安排作息；昼夜相连，经营不设天数上限。
+
+故事抉择
+结交熟客，接单履约；冒险操盘，可能罚款拘押。
+
+macOS · Windows 11
+离线试玩 · 双击启动

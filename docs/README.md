@@ -2,6 +2,11 @@
 
 当前版本：v4连续时间经营，已接入统一牌价与行情干预（存档修订6）。先读根目录 [玩法与开发说明](../README.md)，验证结论以 [最新验收报告](../TEST_REPORT.md) 为准。
 
+## 分发与宣传
+
+- [离线分发构建](distribution/README.md)与[玩家说明](distribution/PLAYER_GUIDE.txt)。
+- [宣传海报与原始提示词](../design/promotion/README.md)。
+
 ## 当前设计与实现
 
 - [统一牌价与主动影响行情](plans/MARKET_CONTROL_PLAN.md)：合法/违法手段、罚款拘押、茶商分支故事及验证入口。
