@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm, mkdir } from 'node:fs/promises';
@@ -15,6 +16,7 @@ const app = join(
   extracted,
   'Bianliang-v4-r6-20260913-macOS/汴梁归途.app/Contents/MacOS/launcher',
 );
+await mkdir('tests/browser-output/distribution', { recursive: true });
 const env = {
   ...process.env,
   BIANLIANG_PORT: '41749',
@@ -54,8 +56,44 @@ try {
     } else await route.continue();
   });
   await page.goto(url);
-  console.log((await page.locator('body').innerText()).slice(0, 1800));
+  const art = JSON.parse(await readFile('public/art/manifest.json', 'utf8'));
+  for (const row of art) {
+    const path = '/' + row.file.replace('public/', '');
+    const response = await page.request.get(url + path);
+    assert.equal(response.status(), 200, path);
+    assert.match(response.headers()['content-type'], /^image\/webp/);
+    assert.equal(
+      createHash('sha256')
+        .update(await response.body())
+        .digest('hex'),
+      row.sha256,
+      path,
+    );
+    const size = await page.evaluate(async (src) => {
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+      return [image.naturalWidth, image.naturalHeight];
+    }, path);
+    assert.deepEqual(size, row.size, path);
+  }
+  await page.locator('.opening-art').evaluate((img) => img.decode());
+  await page.screenshot({
+    path: 'tests/browser-output/distribution/cover.png',
+  });
+  console.log(
+    `All ${art.length} art assets: HTTP, MIME, SHA-256 and browser decoding passed.`,
+  );
   await page.getByRole('button', { name: '走进汴梁 · 3000文' }).first().click();
+  for (const name of ['街巷', '市场', '生产', '住宅', '情报']) {
+    await page
+      .getByRole('navigation', { name: '经营工作区' })
+      .getByRole('button', { name, exact: true })
+      .click();
+    await page
+      .locator('img:visible')
+      .evaluateAll((imgs) => Promise.all(imgs.map((img) => img.decode())));
+  }
   await page.getByRole('button', { name: '市场', exact: true }).click();
   await page.getByText('主动影响粟米行情', { exact: true }).click();
   await page.getByRole('button', { name: '招徕买家', exact: true }).click();
