@@ -10,6 +10,8 @@ import {
   type Venue,
 } from './time.ts';
 import { productionReadyAt } from './production-time.ts';
+import { findStory, storyChoice } from './story-engine.ts';
+import { SCENE_MAP } from './street-scenes.ts';
 
 export function actionTiming(
   s: GameState,
@@ -17,6 +19,28 @@ export function actionTiming(
 ): { minutes: number; venue: Venue } {
   const a = action;
   switch (a.type) {
+    case 'storyRead':
+    case 'storyAbandon':
+      return { minutes: 0, venue: 'home' };
+    case 'storyAction': {
+      const { c } = storyChoice(s, a.storyId, a.stage, a.choiceId);
+      const weight = Object.values(c.cost?.goods ?? {}).reduce(
+        (n, q) => n + q!,
+        0,
+      );
+      return {
+        minutes:
+          c.minutes + (weight ? transportQuote(weight, 'self').minutes : 0),
+        venue: weight ? 'customer' : 'home',
+      };
+    }
+    case 'storyBuy': {
+      findStory(s, a.storyId);
+      return {
+        minutes: transportQuote(a.quantity, a.transport ?? 'self').minutes,
+        venue: 'market',
+      };
+    }
     case 'closeDay':
       return {
         minutes: closeDayPlan(s, a).finishAt - s.clock.minute,
@@ -143,6 +167,13 @@ export function actionTiming(
     case 'maintain':
       return { minutes: 30, venue: 'business' };
     case 'choice':
+      if (s.event?.sceneId) {
+        const c = SCENE_MAP[s.event.sceneId]?.choices.find(
+          (c) => c.id === a.id,
+        );
+        if (!c) throw Error('现场选项不存在');
+        return { minutes: c.minutes, venue: 'home' };
+      }
       if (s.event?.family === 'work' && a.id === 'accept')
         return {
           minutes: s.event.variant === 'rain' ? 240 : 120,
@@ -150,7 +181,12 @@ export function actionTiming(
         };
       return { minutes: 15, venue: 'home' };
     case 'inspect':
-      return { minutes: 15, venue: 'home' };
+      return {
+        minutes: s.event?.sceneId
+          ? SCENE_MAP[s.event.sceneId].inspectMinutes
+          : 15,
+        venue: 'home',
+      };
     case 'eat':
       return { minutes: 30, venue: a.meal === 'diner' ? 'diner' : 'home' };
     case 'feed':

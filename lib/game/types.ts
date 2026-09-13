@@ -2,6 +2,7 @@ import type { MarketOpportunities } from './market-opportunities.ts';
 import type { HomeAssets, FacilityKind } from './home.ts';
 import type { Transport } from './time.ts';
 import type { GameClock } from './time.ts';
+import type { StoryFocus, StoryInstance } from './story-types.ts';
 export type Good =
   | 'grain'
   | 'wheat'
@@ -54,45 +55,14 @@ export interface Price {
   buy: number;
   sell: number;
 }
-export interface Effect {
-  cash?: number;
-  health?: number;
-  stamina?: number;
-  reputation?: number;
-  good?: Good;
-  units?: number;
-  buff?: Buff;
-  help?: boolean;
-  chain?: 'widow' | 'porter';
-}
-export interface OutcomeDefinition {
-  weight: number;
-  text: string;
-  effect: Effect;
-  minRep?: number;
-}
 export interface EventChoice {
   id: string;
   label: string;
   hint: string;
   cost: { cash?: number; stamina?: number };
-  outcomes: OutcomeDefinition[];
-}
-export interface EventVariant {
-  id: string;
-  person: string;
-  fact: string;
-  texts: [string, string];
-  clue: string;
-  inspection: string;
-  choices: EventChoice[];
-}
-export interface EventFamily {
-  id: string;
-  title: string;
-  variants: EventVariant[];
 }
 export interface EventInstance {
+  sceneId: string;
   id: number;
   family: string;
   variant: string;
@@ -100,17 +70,9 @@ export interface EventInstance {
   title: string;
   text: string;
   clue: string;
-  hiddenFact: string;
   inspection: string;
   inspected: boolean;
   choices: EventChoice[];
-}
-export interface ScheduledFollowUp {
-  chain: 'widow' | 'porter';
-  person: string;
-  dueAt: number;
-  branch: 'gift' | 'work' | 'request';
-  source: number;
 }
 export interface WorldEvent {
   id: number;
@@ -128,30 +90,7 @@ export interface WorldEvent {
   source: string;
   clue: string;
 }
-export interface IntelTemplate {
-  id: string;
-  category: string;
-  source: string;
-  semantic: string;
-  skeleton: string;
-  title: string;
-  variants: [string, string, string];
-  kind:
-    | 'market'
-    | 'supply'
-    | 'demand'
-    | 'recipe'
-    | 'teacher'
-    | 'housing'
-    | 'life';
-  resolved?: string;
-  clue?: string;
-  good?: Good;
-  recipeId?: string;
-  skill?: SkillId;
-}
 export interface IntelEntry {
-  customerId?: CustomerId;
   id: string;
   templateId: string;
   title?: string;
@@ -168,7 +107,6 @@ export interface IntelEntry {
   asked?: boolean;
   visited?: boolean;
   reportVersion?: number;
-  resolution?: { due: number; happens: boolean; text: string; clue: string };
 }
 export interface Equipment {
   id: number;
@@ -327,13 +265,12 @@ export interface GameState {
   event: EventInstance | null;
   teaDay: number;
   encounterDay: number;
-  followups: ScheduledFollowUp[];
-  relations: Record<string, number>;
   seen: string[];
   /** Earliest absolute minute each encounter family can recur. */
   cooldowns: Record<string, number>;
   familyCounts: Record<string, number>;
   intel: IntelEntry[];
+  stories: StoryInstance[];
   /** Absolute next-eligible minute for semantic, skeleton and market keys. */
   intelSeen: Record<string, number>;
   skills: Record<SkillId, number>;
@@ -413,7 +350,6 @@ export type Action =
       type:
         | 'market'
         | 'leave'
-        | 'tea'
         | 'short'
         | 'heavy'
         | 'rest'
@@ -422,6 +358,15 @@ export type Action =
         | 'snack';
     }
   | { type: 'return'; confirm?: string }
+  | { type: 'tea'; focus?: StoryFocus }
+  | { type: 'storyAction'; storyId: number; stage: string; choiceId: string }
+  | { type: 'storyRead' | 'storyAbandon'; storyId: number }
+  | {
+      type: 'storyBuy';
+      storyId: number;
+      quantity: number;
+      transport?: Transport;
+    }
   | { type: 'treat'; mode: 'fast' | 'slow' }
   | { type: 'rent' | 'coop' }
   | { type: 'rentHousing' | 'buyHousing'; housing: HousingId }

@@ -1,5 +1,9 @@
 'use client';
 import Image from 'next/image';
+import { knownIntel } from '@/lib/game/intelligence';
+import { knownStory } from '@/lib/game/story-engine';
+import { SCENE_MAP } from '@/lib/game/street-scenes';
+import type { StoryFocus } from '@/lib/game/story-types';
 import { LedgerOverview } from './ledger-overview';
 import { productionCompletionLabel } from '@/lib/game/production-time';
 import {
@@ -876,7 +880,10 @@ function Market({ s, act }: Props) {
         </div>
         <section className="market-opportunities">
           <h2>货盘、夜市与收购</h2>
-          <MarketOpportunitiesView s={s} act={act} />
+          <>
+            <StoryDeliveries s={s} act={act} />
+            <MarketOpportunitiesView s={s} act={act} />
+          </>
         </section>
       </div>
     </Frame>
@@ -1551,6 +1558,68 @@ function People({ s, act }: Props) {
     </Frame>
   );
 }
+function StoryDeliveries({ s, act }: Props) {
+  const entries = s.stories
+    .map((q) => knownStory(s, q))
+    .filter(
+      (q) =>
+        q.opportunity ||
+        (q.status === 'active' &&
+          q.choices.some((c) => c.destination === 'market')),
+    );
+  if (!entries.length) return null;
+  return (
+    <section className="story-deliveries" aria-label="故事交付与货源">
+      <h2>故事交付与货源</h2>
+      {entries.map((q) => (
+        <article key={q.id}>
+          <h3>
+            {q.title} · {q.chapter}
+          </h3>
+          <p>{q.objective}</p>
+          {q.deadlineAt && (
+            <p>截止：{relativeMoment(q.deadlineAt, s.clock.minute)}</p>
+          )}
+          <div className="actions">
+            {q.choices
+              .filter((c) => c.destination === 'market')
+              .map((c) => (
+                <Do
+                  key={c.id}
+                  s={s}
+                  act={act}
+                  action={{
+                    type: 'storyAction',
+                    storyId: q.id,
+                    stage: q.stage,
+                    choiceId: c.id,
+                  }}
+                >
+                  {c.label}
+                </Do>
+              ))}
+            {q.opportunity && (
+              <Do
+                s={s}
+                act={act}
+                action={{ type: 'storyBuy', storyId: q.id, quantity: 1 }}
+              >
+                购入{GOODS[q.opportunity.good].name}1份 · {q.opportunity.price}
+                文
+              </Do>
+            )}
+          </div>
+          {q.opportunity && (
+            <p>
+              余量{q.opportunity.remaining}份 ·{' '}
+              {relativeMoment(q.opportunity.expiresAt, s.clock.minute)}到期
+            </p>
+          )}
+        </article>
+      ))}
+    </section>
+  );
+}
 function Intel({ s, act }: Props) {
   const navigate = useContext(NavigationContext);
   const [category, setCategory] = useWorkspaceValue<string>(
@@ -1561,23 +1630,66 @@ function Intel({ s, act }: Props) {
     'intel.selected',
     '',
   );
-  const entries = s.intel.filter(
-    (i) => category === '全部' || i.category === category,
-  );
-  const i = entries.find((i) => i.id === selected) ?? entries[0];
+  const [focus, setFocus] = useWorkspaceValue<StoryFocus>('intel.focus', 'all');
+  const stories = s.stories
+    .map((q) => knownStory(s, q))
+    .filter(
+      (q) =>
+        category === '全部' ||
+        (category === '可推进' && ['offered', 'active'].includes(q.status)) ||
+        (category === '等待后续' && q.status === 'waiting') ||
+        (category === '已结束' && q.status === 'ended'),
+    )
+    .sort(
+      (a, b) =>
+        Number(b.unread) - Number(a.unread) ||
+        Number(a.status === 'ended') - Number(b.status === 'ended') ||
+        b.id - a.id,
+    );
+  const rumors =
+    category === '全部' || category === '行情线索'
+      ? s.intel.map((i) => ({ ...i, ...knownIntel(s, i) }))
+      : [];
+  const selectedStory = stories.find((q) => `story:${q.id}` === selected);
+  const selectedRumor = rumors.find((q) => q.id === selected);
+  const q = selectedStory ?? (!selectedRumor ? stories[0] : undefined);
+  const i = selectedRumor ?? (!q ? rumors[0] : undefined);
+  const goMarket = () => {
+    setWorkspacePreference('market.opportunities', true);
+    navigate('market');
+  };
+  useEffect(() => {
+    if (q?.unread && !s.event) {
+      setSelected(`story:${q.id}`);
+      act({ type: 'storyRead', storyId: q.id });
+    }
+  }, [q?.id, q?.stage, q?.unread, s.event, setSelected, act]);
   return (
     <Frame
       className="intel-panel"
       scene="teahouse"
       title="茶馆与市井"
-      note="问清出处，过几日回访：街巷里的消息未必都能兑现。"
+      note="眼前的选择，会成为日后的故事。来信与后续都记在这里。"
     >
       <div className="toolbar">
-        <Do s={s} act={act} action={{ type: 'tea' }}>
+        <label>
+          听些什么{' '}
+          <select
+            aria-label="听茶方向"
+            value={focus}
+            onChange={(e) => setFocus(e.target.value as StoryFocus)}
+          >
+            <option value="all">随意听听</option>
+            <option value="trade">买卖</option>
+            <option value="craft">手艺</option>
+            <option value="neighbors">街坊</option>
+          </select>
+        </label>
+        <Do s={s} act={act} action={{ type: 'tea', focus }}>
           茶馆听消息 · 8文
         </Do>
         <label>
-          题材{' '}
+          查阅{' '}
           <select
             aria-label="情报分类"
             value={category}
@@ -1586,7 +1698,7 @@ function Intel({ s, act }: Props) {
               setSelected('');
             }}
           >
-            {['全部', ...new Set(s.intel.map((i) => i.category))].map((x) => (
+            {['全部', '可推进', '等待后续', '已结束', '行情线索'].map((x) => (
               <option key={x}>{x}</option>
             ))}
           </select>
@@ -1595,74 +1707,166 @@ function Intel({ s, act }: Props) {
       <div className="split">
         <div className="list-column">
           <div className="item-list">
-            {entries.map((e) => (
+            {stories.map((entry) => (
               <button
-                key={e.id}
-                className={`list-item ${i?.id === e.id ? 'selected' : ''}`}
-                onClick={() => setSelected(e.id)}
+                key={entry.id}
+                className={`list-item ${q?.id === entry.id ? 'selected' : ''}`}
+                onClick={() => {
+                  setSelected(`story:${entry.id}`);
+                  if (entry.unread)
+                    act({ type: 'storyRead', storyId: entry.id });
+                }}
               >
                 <span>
-                  <strong>{e.title ?? `${e.category} · ${e.source}`}</strong>
-                  <small>
-                    {e.source} · 第{e.heardDay}日 ·{' '}
-                    {e.customerId
-                      ? '人物供货机会'
-                      : e.worldId
-                        ? '行情线索'
-                        : '市井见闻'}
-                  </small>
+                  <strong>{entry.title}</strong>
+                  <small>{entry.chapter}</small>
                 </span>
                 <small>
-                  {!e.visited || e.status === 'new'
-                    ? '待验证'
-                    : e.status === 'confirmed'
-                      ? '已有后续'
-                      : e.status === 'wrong'
-                        ? '未兑现'
-                        : '已过期'}
+                  {entry.unread ? '新进展 · ' : ''}
+                  {
+                    {
+                      offered: '可接故事',
+                      active: '可推进',
+                      waiting: '等待来信',
+                      ended: '已结束',
+                    }[entry.status]
+                  }
                 </small>
               </button>
             ))}
-            {!entries.length && (
-              <p>还没有这一类消息。每天可在茶馆听取三条不同题材的内容。</p>
+            {rumors.map((entry) => (
+              <button
+                key={entry.id}
+                className={`list-item ${i?.id === entry.id ? 'selected' : ''}`}
+                onClick={() => setSelected(entry.id)}
+              >
+                <span>
+                  <strong>{entry.title}</strong>
+                  <small>{entry.source} · 行情线索</small>
+                </span>
+                <small>
+                  {
+                    {
+                      new: '待核实',
+                      confirmed: '已有公开进展',
+                      wrong: '时限内未兑现',
+                      expired: '已过期',
+                    }[entry.status]
+                  }
+                </small>
+              </button>
+            ))}
+            {!stories.length && !rumors.length && (
+              <p>还没有这一类消息。茶馆和外出偶遇都可能开启故事。</p>
             )}
           </div>
         </div>
-        <aside className="detail">
-          {i ? (
+        <aside className="detail story-detail">
+          {q ? (
             <>
               <div className="speaker-heading">
                 <span className="speaker-seal" aria-hidden="true">
-                  {i.source.slice(0, 1)}
+                  {q.person.slice(0, 1)}
                 </span>
-                <h2>{i.source}的消息</h2>
+                <h2>{q.chapter}</h2>
               </div>
-              {i.customerId && (
-                <Btn subtle onClick={() => navigate('orders')}>
-                  查看供货订单
-                </Btn>
+              <TextPages text={q.text} />
+              <p className="story-objective">{q.objective}</p>
+              {q.production && (
+                <section>
+                  <p>
+                    本阶段已生产{GOODS[q.production.good].name}：
+                    {q.production.completed} / {q.production.quantity}
+                  </p>
+                  <Btn onClick={() => navigate('production')}>前往生产</Btn>
+                </section>
               )}
+              {q.deadlineAt && (
+                <p>截止：{relativeMoment(q.deadlineAt, s.clock.minute)}</p>
+              )}
+              {q.status !== 'ended' && (
+                <div className="actions">
+                  {q.choices.map((c) =>
+                    c.destination === 'market' ? (
+                      <section className="action-card" key={c.id}>
+                        <Btn onClick={goMarket}>前往市场：{c.label}</Btn>
+                        <small>{c.costText}</small>
+                      </section>
+                    ) : (
+                      <Do
+                        key={c.id}
+                        s={s}
+                        act={act}
+                        action={{
+                          type: 'storyAction',
+                          storyId: q.id,
+                          stage: q.stage,
+                          choiceId: c.id,
+                        }}
+                      >
+                        {c.label}
+                      </Do>
+                    ),
+                  )}
+                </div>
+              )}
+              {q.opportunity && (
+                <Btn onClick={goMarket}>查看这次获得的限量货源</Btn>
+              )}
+              {!!q.history.length && (
+                <details>
+                  <summary>此前的选择 · {q.history.length}段</summary>
+                  {q.history.map((h, n) => (
+                    <article key={n}>
+                      <h3>
+                        {h.chapter} · {h.label}
+                      </h3>
+                      <small>{relativeMoment(h.at, s.clock.minute)}</small>
+                      <p>{h.text}</p>
+                    </article>
+                  ))}
+                </details>
+              )}
+              {q.status !== 'ended' && q.status !== 'offered' && (
+                <div className="story-abandon">
+                  <Do
+                    s={s}
+                    act={act}
+                    action={{ type: 'storyAbandon', storyId: q.id }}
+                  >
+                    放下这条故事
+                  </Do>
+                  <small>结束当前承诺，未完成的报酬不再有效。</small>
+                </div>
+              )}
+            </>
+          ) : i ? (
+            <>
+              <h2>{i.source}的消息</h2>
               <TextPages
-                key={i.id}
                 text={
                   i.text +
                   ((i.asked || i.visited) && i.followUp
-                    ? `\n${i.visited ? '核对结果' : '追问所得'}：${i.followUp}`
+                    ? `\n核对所得：${i.followUp}`
                     : '')
                 }
-                size={160}
               />
-              <div className="actions">
-                <Do s={s} act={act} action={{ type: 'askIntel', id: i.id }}>
-                  追问出处
-                </Do>
-                <Do s={s} act={act} action={{ type: 'visitIntel', id: i.id }}>
-                  回访核对
-                </Do>
-              </div>
+              {i.publicUpdate && (
+                <p className="story-objective">公开进展：{i.publicUpdate}</p>
+              )}
+              {i.status === 'new' && (
+                <div className="actions">
+                  <Do s={s} act={act} action={{ type: 'askIntel', id: i.id }}>
+                    追问出处
+                  </Do>
+                  <Do s={s} act={act} action={{ type: 'visitIntel', id: i.id }}>
+                    回访核对
+                  </Do>
+                </div>
+              )}
             </>
           ) : (
-            <p>选一条消息查看全文及后续。</p>
+            <p>选一条消息查看故事和后续。</p>
           )}
         </aside>
       </div>
@@ -2361,7 +2565,7 @@ function LifeControls({ s, act }: Props) {
 function Encounter({ s, act }: Props) {
   const e = s.event!;
   return (
-    <Frame title={e.title} note="先读经过和线索，再选择如何回应。">
+    <div className="encounter-body">
       <div className="split">
         <div className="detail">
           <TextPages
@@ -2374,7 +2578,10 @@ function Encounter({ s, act }: Props) {
             size={170}
           />
           <Do s={s} act={act} action={{ type: 'inspect' }}>
-            向附近人查问 · 5文
+            核实现场经过
+            {s.event?.sceneId && SCENE_MAP[s.event.sceneId].inspectCash
+              ? ` · ${SCENE_MAP[s.event.sceneId].inspectCash}文`
+              : ''}
           </Do>
         </div>
         <aside className="detail">
@@ -2383,7 +2590,7 @@ function Encounter({ s, act }: Props) {
             {e.choices.map((c) => (
               <section key={c.id}>
                 <TextPages text={c.hint} size={100} />
-                <p>现金消耗 {money(c.cost.cash ?? 0)}</p>
+
                 <Do
                   s={s}
                   act={act}
@@ -2396,7 +2603,7 @@ function Encounter({ s, act }: Props) {
           </div>
         </aside>
       </div>
-    </Frame>
+    </div>
   );
 }
 export default function Home() {
@@ -2488,6 +2695,7 @@ export default function Home() {
       'sellHousing',
       'sellEquipment',
       'abandonOrder',
+      'storyAbandon',
     ].includes(a.type);
     if (!p.error && (p.confirmation || destructive))
       setPending({
@@ -2505,6 +2713,9 @@ export default function Home() {
         revision: ref.current.revision,
         message:
           p.warning ||
+          (a.type === 'storyAbandon'
+            ? '结束这条故事的当前承诺，未完成的报酬不再有效，本局不能重新接取。'
+            : '') ||
           '此操作会出售资产或暂停经营；放弃生产不退原料，退租不退租金。',
       });
     else execute(a);
@@ -2783,8 +2994,6 @@ export default function Home() {
                             </aside>
                           </div>
                         </Frame>
-                      ) : s.event ? (
-                        <Encounter key={s.event.id} s={s} act={act} />
                       ) : tab === 'market' ? (
                         <Market s={s} act={act} />
                       ) : tab === 'street' ? (
@@ -2909,6 +3118,25 @@ export default function Home() {
                   收下这份喜悦
                 </button>
               </output>
+            )}
+            {s?.event && s.phase !== 'ended' && (
+              <Dialog
+                open
+                modal
+                disablePointerDismissal
+                onOpenChange={(_open, details) => details.cancel()}
+              >
+                <DialogContent
+                  className="encounter-modal"
+                  showCloseButton={false}
+                >
+                  <DialogTitle>街巷意外 · {s.event.title}</DialogTitle>
+                  <DialogDescription>
+                    请先回应眼前的事。阅读不会消耗时间，选择后按实际行动结算。
+                  </DialogDescription>
+                  <Encounter key={s.event.id} s={s} act={act} />
+                </DialogContent>
+              </Dialog>
             )}
             <Dialog open={todayOpen} onOpenChange={setTodayOpen}>
               <DialogContent className="confirm history-dialog">

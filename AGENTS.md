@@ -13,6 +13,7 @@
 - **整齐而紧凑的工作区**：导航连续、等宽，当前页标识明确；输入与所属操作归组，主要按钮和说明按固定网格对齐。桌面资产与记录常驻，长内容在区域内滚动；手机按阅读顺序排列。
 - **当前界面约定**：时辰状态行放最底部，删除旧底部快捷按钮。顶部工具区只保留“导出备份”和“重新开始”，不恢复手动减少动态开关或旧版导出入口；继续尊重系统减少动态设置。
 - **尚未发布，只支持当前存档**：不做旧存档迁移、修复前备份或旧版导出。改变存档结构时明确格式边界及是否需要重新开始，不静默补造缺失数据。
+- **意外与故事选择**：外出意外使用强制弹窗并保留免费拒绝；后续统一进入情报。分支须改变人物、目标或结局，并连接实际经营，不能只更换文案和奖励。普通来信不强制打断。
 - **实际结果与真实验证**：操作反馈要显示真实变化，切换页面不丢失最近结果；公开接口只给玩家已知信息。界面改动要检查真实浏览器中的满列表、缺料禁用、展开详情与手机状态，不能只验空白页面或仅凭测试数量宣布完成。
 - **可持续交付**：源码、测试、美术原图、网页资源、提示词与素材清单一起维护。旧文档归档并更新索引；截图、模拟输出、缓存与构建产物留本地且加入忽略规则。提交前检查清单与工作区状态；区分本地提交与远端推送，按用户授权执行。
 
@@ -21,7 +22,7 @@
 《汴梁归途》 uses React, TypeScript, and Vinext/Vite.
 
 - `app/`: page composition, layout, and global styles.
-- `lib/game/`: shared game logic. `types.ts` defines state/actions; `config.ts` defines rules; `content.ts` holds encounters/intelligence; `engine.ts` handles actions, settlement, and saves; `webmcp.ts` exposes player-facing tools.
+- `lib/game/`: shared game logic. `types.ts` defines state/actions; `config.ts` defines rules; `stories.ts` and `street-scenes.ts` hold authored stories/scenes, `story-engine.ts` manages branching progress, and `intelligence.ts` projects public rumors; `engine.ts` handles actions, settlement, and saves; `webmcp.ts` exposes player-facing tools.
 - `components/ui/` and `hooks/`: reusable UI components and hooks; `public/`: static assets.
 - `tests/`: rule/interface tests, simulations, content review, and browser flows.
 - `scripts/`: local serving and build helpers.
@@ -57,4 +58,4 @@ History mixes Chinese summaries and English `feat:` messages; no uniform prefix 
 
 ## Game Architecture & Persistence
 
-Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4`. This unpublished project supports only the current save format: do not add legacy migration, repair backups, or old-save export controls. Expose only player-known information through WebMCP.
+Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4` with `saveRevision: 5` for branching stories. This unpublished project supports only the current save format: do not add legacy migration, repair backups, or old-save export controls. Expose only player-known information through WebMCP.

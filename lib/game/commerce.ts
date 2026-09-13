@@ -547,13 +547,6 @@ export function milestoneProgress(s: GameState, id: string) {
   if (id === 'skill') return `${Math.max(...Object.values(s.skills))}/2级`;
   return '进行中';
 }
-export function customerOpportunity(s: GameState) {
-  return CUSTOMER_IDS.find(
-    (id) =>
-      !s.commerce.customers[id]?.met &&
-      !s.intel.some((i) => i.customerId === id),
-  );
-}
 export function validCommerce(s: GameState): boolean {
   const c = s.commerce;
   if (

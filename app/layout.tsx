@@ -3,6 +3,7 @@ import './globals.css';
 import './art.css';
 import './workbench.css';
 import './controls.css';
+import './stories.css';
 export const metadata: Metadata = {
   icons: { icon: '/favicon.svg' },
   title: '汴梁归途 · 长期经营手记',

@@ -1,4 +1,6 @@
+import { knownIntel } from './intelligence.ts';
 import { citySchedule, fatigueLabel } from './time.ts';
+import { knownStory } from './story-engine.ts';
 import { productionReadyAt } from './production-time.ts';
 import { statusActive } from './status.ts';
 import { publicOpportunities } from './market-opportunities.ts';
@@ -127,6 +129,21 @@ export function publicState(s: GameState | null) {
     })),
     equipment: s.equipment,
     ledger: s.ledger,
+    stories: s.stories.map((q) => {
+      const view = knownStory(s, q);
+      return {
+        ...view,
+        choices: view.choices.map((c) => ({
+          ...c,
+          preview: actionPreview(s, {
+            type: 'storyAction',
+            storyId: q.id,
+            stage: q.stage,
+            choiceId: c.id,
+          }),
+        })),
+      };
+    }),
     intelligence: s.intel.map((i) => ({
       id: i.id,
       followUp: i.asked || i.visited ? i.followUp : undefined,
@@ -136,7 +153,7 @@ export function publicState(s: GameState | null) {
       source: i.source,
       text: i.text,
       heardDay: i.heardDay,
-      status: i.visited ? i.status : 'new',
+      ...knownIntel(s, i),
     })),
     rumors: s.worlds
       .filter((w) => w.heard)
@@ -168,6 +185,11 @@ export function publicState(s: GameState | null) {
           ...(s.event.inspected ? { inspection: s.event.inspection } : {}),
           choices: s.event.choices.map((c) => ({
             id: c.id,
+            preview: actionPreview(s, {
+              type: 'choice',
+              eventId: s.event!.id,
+              id: c.id,
+            }),
             label: c.label,
             hint: c.hint,
             cost: {
@@ -310,6 +332,10 @@ export function registerGameTools(
               side: { enum: ['buy', 'sell'] },
               id: { type: 'string' },
               eventId: { type: 'integer' },
+              storyId: { type: 'integer' },
+              stage: { type: 'string' },
+              choiceId: { type: 'string' },
+              focus: { enum: ['all', 'trade', 'craft', 'neighbors'] },
               meal: {
                 enum: [...Object.keys(MEALS), 'none'],
                 description: '主餐配方见状态 meals；蛋类需搭配粟米，食肆60文。',

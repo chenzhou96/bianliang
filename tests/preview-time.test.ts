@@ -2,46 +2,37 @@ import { setDay } from './helpers.ts';
 import { generateOrders } from '../lib/game/commerce.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, dispatch, actionPreview } from '../lib/game/engine.ts';
-import { EVENTS } from '../lib/game/content.ts';
+import {
+  newGame,
+  dispatch,
+  actionPreview,
+  maybeEncounter,
+} from '../lib/game/engine.ts';
+import { STREET_SCENES } from '../lib/game/street-scenes.ts';
 
-await test('公开预览不暴露随机遭遇报酬，随机数变化不改变可知预览', () => {
+await test('现场预览不泄露后续，随机数不覆盖已经作出的明确选择', () => {
   const s = newGame(23);
-  const family = EVENTS.find((f) => f.id === 'work')!;
-  const variant = family.variants.find((v) => v.id === 'broker')!;
-  s.event = {
-    id: s.nextId++,
-    family: family.id,
-    variant: variant.id,
-    title: family.title,
-    person: variant.person,
-    text: variant.texts[0],
-    clue: variant.clue,
-    hiddenFact: variant.fact,
-    inspection: variant.inspection,
-    inspected: false,
-    choices: structuredClone(variant.choices),
-  };
-  const action = { type: 'choice', eventId: s.event.id, id: 'accept' } as const;
-  const before = structuredClone(s);
-  const preview = actionPreview(s, action);
+  setDay(s, 2);
+  s.cooldowns = Object.fromEntries(
+    STREET_SCENES.filter((e) => e.family !== 'work').map((e) => [
+      e.family,
+      99999,
+    ]),
+  );
+  maybeEncounter(s, true, 'work');
+  assert.equal(s.event?.sceneId, 'porter-rope');
+  const action = { type: 'choice', eventId: s.event!.id, id: 'work' } as const;
+  const before = structuredClone(s),
+    preview = actionPreview(s, action);
   assert.equal(preview.error, undefined);
-  assert.equal(preview.cashChange, null);
-  assert.equal(preview.healthChange, null);
-  assert.equal(preview.staminaChange, null);
-  assert.equal(preview.minutes, 120);
-  const incomes = new Set<number>();
+  assert.equal(preview.minutes, 60);
   for (let seed = 1; seed <= 40; seed++) {
     const next = { ...s, rng: seed * 7919 };
     assert.deepEqual(actionPreview(next, action), preview);
     const done = dispatch(next, action);
     assert.equal(done.error, undefined);
-    incomes.add(done.state.cash - next.cash);
+    assert.equal(done.state.cash - next.cash, 30);
   }
-  assert.ok(
-    incomes.size > 1,
-    'the fixture must exercise genuinely different outcomes',
-  );
   assert.deepEqual(s, before);
 });
 

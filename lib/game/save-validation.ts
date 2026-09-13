@@ -5,6 +5,7 @@ import { CUSTOMER_IDS } from './commerce.ts';
 import { TRADE_MILESTONES } from './market-opportunities.ts';
 import { clockDay, lifeCycle, timeOfDay, validClock } from './time.ts';
 import type { GameState, Good } from './types.ts';
+import { SCENE_MAP } from './street-scenes.ts';
 
 const integer = (n: unknown, minimum = 0): n is number =>
   Number.isSafeInteger(n) && (n as number) >= minimum;
@@ -26,10 +27,56 @@ export function validContinuousSave(s: GameState): boolean {
       return false;
     if (
       !Array.isArray(s.intel) ||
-      s.intel.some((i) => i.reportVersion !== 2 && i.worldId === undefined)
+      !unique(s.intel.map((i) => i.id)) ||
+      s.intel.some(
+        (i) =>
+          i.reportVersion !== 3 ||
+          !integer(i.worldId, 1) ||
+          Object.hasOwn(i, 'resolution') ||
+          ![i.id, i.templateId, i.category, i.source, i.semantic, i.text].every(
+            (v) => typeof v === 'string',
+          ) ||
+          !integer(i.heardDay, 1) ||
+          !integer(i.usefulUntil, 1) ||
+          !['new', 'confirmed', 'expired', 'wrong'].includes(i.status) ||
+          (i.title !== undefined && typeof i.title !== 'string') ||
+          (i.good !== undefined && !GOOD_IDS.includes(i.good)) ||
+          (i.asked !== undefined && typeof i.asked !== 'boolean') ||
+          (i.visited !== undefined && typeof i.visited !== 'boolean') ||
+          (i.followUp !== undefined && typeof i.followUp !== 'string'),
+      )
     )
       return false;
     const now = s.clock.minute;
+    if (s.event !== null) {
+      const e = s.event,
+        scene = SCENE_MAP[e.sceneId];
+      if (
+        !scene ||
+        !integer(e.id, 1) ||
+        e.id >= s.nextId ||
+        typeof e.inspected !== 'boolean' ||
+        e.family !== scene.family ||
+        e.variant !== scene.id ||
+        e.title !== scene.title ||
+        e.person !== scene.person ||
+        e.text !== scene.text ||
+        e.clue !== scene.clue ||
+        e.inspection !== scene.inspection ||
+        !Array.isArray(e.choices) ||
+        e.choices.length !== scene.choices.length ||
+        e.choices.some(
+          (c, n) =>
+            c.id !== scene.choices[n].id ||
+            c.label !== scene.choices[n].label ||
+            typeof c.hint !== 'string' ||
+            !record(c.cost) ||
+            (c.cost.cash ?? 0) !== (scene.choices[n].cost?.cash ?? 0) ||
+            (c.cost.stamina ?? 0) !== (scene.choices[n].cost?.stamina ?? 0),
+        )
+      )
+        return false;
+    }
     if (
       !record(s.buffs) ||
       Object.entries(s.buffs).some(
@@ -40,23 +87,6 @@ export function validContinuousSave(s: GameState): boolean {
       Object.values(s.intelSeen).some((until) => !integer(until)) ||
       !record(s.cooldowns) ||
       Object.values(s.cooldowns).some((until) => !integer(until))
-    )
-      return false;
-    if (
-      !Array.isArray(s.followups) ||
-      s.followups.length > 2 ||
-      !unique(s.followups.map((f) => f.chain)) ||
-      s.followups.some(
-        (f) =>
-          !['widow', 'porter'].includes(f.chain) ||
-          typeof f.person !== 'string' ||
-          !integer(f.dueAt) ||
-          !integer(f.source) ||
-          f.source > now ||
-          f.dueAt <= f.source ||
-          !['gift', 'work', 'request'].includes(f.branch) ||
-          s.relations[f.chain] !== f.source,
-      )
     )
       return false;
     const life = s.life;

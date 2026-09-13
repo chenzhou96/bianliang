@@ -8,7 +8,7 @@ import {
   newGame,
   readSave,
 } from '../lib/game/engine.ts';
-import { EVENTS } from '../lib/game/content.ts';
+import { STREET_SCENES } from '../lib/game/street-scenes.ts';
 import { STATUS_DURATION } from '../lib/game/status.ts';
 import { setDay } from './helpers.ts';
 
@@ -70,7 +70,7 @@ await test('遭遇冷却按绝对时点开放，未到期无法强制触发', ()
   const s = newGame(27);
   setDay(s, 2, 480);
   s.cooldowns = Object.fromEntries(
-    EVENTS.map((e) => [e.id, s.clock.minute + 60]),
+    STREET_SCENES.map((e) => [e.family, s.clock.minute + 60]),
   );
   maybeEncounter(s, true);
   assert.equal(s.event, null);

@@ -1,3 +1,6 @@
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { knownStory } from '../lib/game/story-engine.ts';
 import {
   Worker,
   isMainThread,
@@ -50,7 +53,13 @@ const median = (values: number[]) => {
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
 };
-function run(seed: number, strategy: Strategy, days: number, late = false) {
+export function run(
+  seed: number,
+  strategy: Strategy,
+  days: number,
+  late = false,
+  storyPolicy: 'none' | 'selective' | 'frequent' = 'none',
+) {
   let s = newGame(seed, 30000);
   const initial = assets(s);
   let developmentDay: number | null = null;
@@ -98,16 +107,28 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
   const act = (action: Action) => {
     if (s.phase === 'ended') return false;
     if (s.event && action.type !== 'choice') {
+      const sceneChoice =
+        storyPolicy === 'none'
+          ? undefined
+          : s.event.choices.find(
+              (c) =>
+                c.id !== 'decline' &&
+                !actionPreview(s, {
+                  type: 'choice',
+                  eventId: s.event!.id,
+                  id: c.id,
+                }).error,
+            );
       const result = dispatch(s, {
         type: 'choice',
         eventId: s.event.id,
-        id: 'decline',
+        id: sceneChoice?.id ?? 'decline',
       });
       assert.equal(result.error, undefined);
       observe(s, result.state, {
         type: 'choice',
         eventId: s.event.id,
-        id: 'decline',
+        id: sceneChoice?.id ?? 'decline',
       });
       s = result.state;
     }
@@ -215,6 +236,47 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
       !s.home.facilities.some((f) => f.kind === 'coldStorage')
     )
       act({ type: 'installFacility', facility: 'coldStorage' });
+    if (
+      storyPolicy !== 'none' &&
+      (storyPolicy === 'frequent' || day % 3 === 0)
+    ) {
+      const time = s.clock.minute % 1440;
+      if (time < 540) act({ type: 'wait', minutes: 540 - time });
+      if (s.cash > 100) act({ type: 'tea', focus: 'craft' });
+      for (let turn = 0; turn < (storyPolicy === 'frequent' ? 4 : 1); turn++) {
+        const views = s.stories.map((q) => knownStory(s, q));
+        let advanced = false;
+        for (const q of views) {
+          const candidates = q.choices.filter((c) => c.id !== 'decline');
+          // Rotate only visible options; this policy never reads hidden next stages.
+          const c = candidates[(seed + turn) % Math.max(1, candidates.length)];
+          if (!c) continue;
+          for (const [g, n] of Object.entries(c.cost?.goods ?? {})) {
+            const missing = Math.max(0, n! - quantity(s, g as Good));
+            if (missing && s.cash > missing * quote(s, g as Good).buy + 120)
+              buy(g as Good, missing);
+          }
+          const action = {
+            type: 'storyAction',
+            storyId: q.id,
+            stage: q.stage,
+            choiceId: c.id,
+          } as const;
+          const p = actionPreview(s, action);
+          if (
+            p.error ||
+            p.energy > s.stamina - 20 ||
+            (c.cost?.cash ?? 0) > s.cash - 120
+          )
+            continue;
+          if (act(action)) {
+            advanced = true;
+            break;
+          }
+        }
+        if (!advanced) break;
+      }
+    }
     if (s.stamina < 55) act({ type: 'rest' });
     for (const g of GOOD_IDS) {
       if (g === 'hen') continue;
@@ -372,10 +434,18 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
     });
     if (day % 25 === 0) assert.deepEqual(readSave(JSON.stringify(s)), s);
   }
-  assert.equal(s.stats.workIncome, 0, 'no labor subsidy');
+  if (storyPolicy === 'none')
+    assert.equal(s.stats.workIncome, 0, 'no labor subsidy');
   return {
     seed,
     strategy,
+    storyPolicy,
+    storySummary: {
+      discovered: s.stories.length,
+      ended: s.stories.filter((q) => q.status === 'ended').length,
+      records: s.stories.reduce((n, q) => n + q.history.length, 0),
+      xp: s.skillXp,
+    },
     late,
     days: snapshots.length,
     survived: s.phase !== 'ended',
@@ -436,7 +506,10 @@ if (!isMainThread && workerData?.runner) {
       }
     },
   );
-} else {
+} else if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const samples = Number(process.env.SIMULATION_SAMPLES ?? 30);
   const days = Number(process.env.SIMULATION_DAYS ?? 100);
   assert(

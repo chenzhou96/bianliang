@@ -1,3 +1,4 @@
+import { knownIntel } from './intelligence.ts';
 import { recordCash, validCashHistory } from './ledger.ts';
 import { productionEarliest } from './production-time.ts';
 import { formatMoment } from './time.ts';
@@ -52,7 +53,19 @@ import {
   XP_TO_LEVEL,
   WORLD_FAMILIES,
 } from './config.ts';
-import { EVENTS, INFO_TEMPLATES, out, option, decline } from './content.ts';
+import { STORIES, STORY_MAP } from './stories.ts';
+import { STREET_SCENES, SCENE_MAP } from './street-scenes.ts';
+import {
+  activeStories,
+  discoverStory,
+  findStory,
+  recordStoryChoice,
+  recordStoryProduction,
+  refreshStories,
+  storyChoice,
+  validStories,
+} from './story-engine.ts';
+import type { StoryCost, StoryReward } from './story-types.ts';
 import { isOperatingAction, operationResult } from './feedback.ts';
 import {
   newCommerce,
@@ -67,7 +80,6 @@ import {
   CUSTOMER_DECLINES,
   CUSTOMER_IDS,
   customerStage,
-  customerOpportunity,
   validCommerce,
   MILESTONES,
 } from './commerce.ts';
@@ -75,9 +87,7 @@ import type {
   Action,
   Batch,
   Buff,
-  Effect,
   EquipmentKind,
-  EventInstance,
   GameState,
   Good,
   IntelEntry,
@@ -361,7 +371,7 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
       lastDawn: 360,
       wakeSummary: null,
     },
-    saveRevision: 4,
+    saveRevision: 5,
     operationHistory: [],
     version: 4,
     rules: RULES.version,
@@ -388,12 +398,11 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
     event: null,
     teaDay: 0,
     encounterDay: 0,
-    followups: [],
-    relations: {},
     seen: [],
     cooldowns: {},
     familyCounts: {},
     intel: [],
+    stories: [],
     intelSeen: {},
     skills: emptySkills(),
     skillXp: emptySkills(),
@@ -451,152 +460,141 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
   return s;
 }
 
-function followupEvent(
+/** Discover only after a complete real-world operation, never on navigation. */
+export function maybeEncounter(
   s: GameState,
-  f: GameState['followups'][number],
-): EventInstance {
-  const isWidow = f.chain === 'widow';
-  return {
-    id: s.nextId++,
-    family: 'followup',
-    variant: f.branch,
-    person: f.person,
-    title: isWidow ? '故人捎来口信' : '码头又见',
-    text: `${f.person}认出了你，提起第${f.source}日你帮忙的事。${f.branch === 'gift' ? '这回带来了一点心意。' : '这回有个机会，问你是否愿意。'}`,
-    clue: '是你先前认识的人，你认得对方。',
-    hiddenFact: f.branch,
-    inspection: '你们核对了旧事，对方确实是那个人。',
-    inspected: false,
-    choices:
-      f.branch === 'gift'
-        ? [
-            option('accept', '收下心意', '没有额外成本。', {}, [
-              out(
-                1,
-                `${f.person}递给你一点回礼，认真说了声谢谢。`,
-                isWidow ? { good: 'egg', units: 20 } : { cash: 25 },
-              ),
-            ]),
-            decline,
-          ]
-        : [
-            option(
-              'accept',
-              isWidow ? '接受引荐' : '帮忙搬货',
-              isWidow
-                ? '没有额外成本；介绍认识粮商。'
-                : '消耗20体力；约定报酬40文。',
-              isWidow ? {} : { stamina: 20 },
-              [
-                out(
-                  1,
-                  isWidow
-                    ? '粮商听了经过，愿意给你五日熟客价。'
-                    : '阿成照约定付了40文。',
-                  isWidow ? { buff: 'regular' } : { cash: 40 },
-                ),
-              ],
-            ),
-            decline,
-          ],
-  };
-}
-const repeatable = new Set(['work', 'meal', 'shelter', 'doctor']);
-export function maybeEncounter(s: GameState, force = false) {
+  force = false,
+  context: 'trade' | 'work' = 'trade',
+) {
   if (
     s.event ||
+    s.phase === 'ended' ||
     s.encounterDay === clockDay(s.life.lastDawn) ||
     clockDay(s.life.lastDawn) === 1
   )
     return;
-  const due = s.followups.find(
-    (f) => f.dueAt <= s.clock.minute && s.relations[f.chain] === f.source,
+  if (!force && random(s) > 0.42) return;
+  const eligible = STREET_SCENES.filter(
+    (scene) =>
+      scene.contexts.includes(context) &&
+      (s.cooldowns[scene.family] ?? 0) <= s.clock.minute &&
+      (!scene.storyId ||
+        !s.stories.some((q) => q.definitionId === scene.storyId)),
   );
-  if (due) {
-    s.followups = s.followups.filter((f) => f !== due);
-    s.event = followupEvent(s, due);
-  } else {
-    if (!force && random(s) > 0.42) return;
-    const eligible = EVENTS.filter(
-      (f) =>
-        (s.cooldowns[f.id] ?? 0) <= s.clock.minute &&
-        (repeatable.has(f.id) ||
-          f.variants.some((v) => !s.seen.includes(`${f.id}:${v.id}`))),
-    );
-    if (!eligible.length) return;
-    const family = pickWeighted(
-      s,
-      eligible.map((f) => ({
-        weight: 1 / (1 + (s.familyCounts[f.id] ?? 0)),
-        f,
-      })),
-    ).f;
-    const variants = family.variants.filter(
-      (v) =>
-        repeatable.has(family.id) || !s.seen.includes(`${family.id}:${v.id}`),
-    );
-    const v = variants[integer(s, 0, variants.length - 1)];
-    s.event = {
-      id: s.nextId++,
-      family: family.id,
-      variant: v.id,
-      person: v.person,
-      title: family.title,
-      text: v.texts[integer(s, 0, 1)],
-      clue: v.clue,
-      hiddenFact: v.fact,
-      inspection: v.inspection,
-      inspected: false,
-      choices: structuredClone(v.choices),
-    };
-    if (!s.seen.includes(`${family.id}:${v.id}`))
-      s.seen.push(`${family.id}:${v.id}`);
-    s.cooldowns[family.id] = s.clock.minute + 7 * 1440;
-    s.familyCounts[family.id] = (s.familyCounts[family.id] ?? 0) + 1;
-  }
+  if (!eligible.length) return;
+  const scene = pickWeighted(
+    s,
+    eligible.map((scene) => ({
+      scene,
+      weight: 1 / (1 + (s.familyCounts[scene.family] ?? 0)),
+    })),
+  ).scene;
+  s.event = {
+    id: s.nextId++,
+    sceneId: scene.id,
+    family: scene.family,
+    variant: scene.id,
+    person: scene.person,
+    title: scene.title,
+    text: scene.text,
+    clue: scene.clue,
+    inspection: scene.inspection,
+    inspected: false,
+    choices: scene.choices.map((c) => ({
+      id: c.id,
+      label: c.label,
+      hint: [
+        c.cost?.cash ? `支付${c.cost.cash}文` : '',
+        c.reward?.cash ? `约定报酬${c.reward.cash}文` : '',
+        c.storyStage ? '参与后有故事后续' : '',
+        c.evidence ? '需要先核实经过' : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      cost: {
+        ...(c.cost?.cash ? { cash: c.cost.cash } : {}),
+        ...(c.cost?.stamina ? { stamina: c.cost.stamina } : {}),
+      },
+    })),
+  };
+  s.cooldowns[scene.family] = s.clock.minute + 7 * 1440;
+  s.familyCounts[scene.family] = (s.familyCounts[scene.family] ?? 0) + 1;
   s.encounterDay = clockDay(s.life.lastDawn);
   s.stats.events++;
-  log(s, `街巷偶遇：${s.event.title}。`);
+  log(s, `街巷偶遇：${scene.title}。`);
 }
-function effect(s: GameState, e: Effect, person: string, acquisitionCost = 0) {
-  if (e.cash) money(s, e.cash, '遭遇收支');
-  if (e.good && e.units) {
-    add(s, e.good, e.units, acquisitionCost, acquisitionCost ? 'buy' : 'gift');
-    log(s, '遭遇带来货物变化。', 0, `${GOODS[e.good].name} +${e.units / 10}`);
+function storyCost(
+  s: GameState,
+  cost: StoryCost = {},
+  label: string,
+  revenue = 0,
+) {
+  if (s.cash < (cost.cash ?? 0) || s.stamina < (cost.stamina ?? 0))
+    throw Error('现金或体力不足');
+  for (const [g, n] of Object.entries(cost.goods ?? {}))
+    if (quantity(s, g as Good) < n!)
+      throw Error(`${GOODS[g as Good].name}不足，需要${n}`);
+  if (cost.cash) {
+    money(s, -cost.cash, label);
+    s.ledger.social += cost.cash;
   }
-  s.health = clamp(s.health + (e.health ?? 0), 0, 100);
-  s.stamina = clamp(s.stamina + (e.stamina ?? 0), 0, staminaMax(s));
-  s.reputation += e.reputation ?? 0;
-  if (e.buff) {
-    s.buffs[e.buff] = s.clock.minute + STATUS_DURATION[e.buff];
-    log(s, `获得「${BUFFS[e.buff].name}」：${BUFFS[e.buff].detail}`);
+  s.stamina -= cost.stamina ?? 0;
+  let total = 0,
+    producedCost = 0,
+    producedUnits = 0,
+    units = 0;
+  for (const [g, n] of Object.entries(cost.goods ?? {})) {
+    const taken = consume(s, g as Good, n! * 10);
+    total += taken.cost;
+    producedCost += taken.productionCost;
+    producedUnits += taken.production;
+    units += n! * 10;
   }
-  if (e.help) s.stats.helped++;
-  if (
-    e.chain &&
-    s.followups.length < 2 &&
-    !s.followups.some((f) => f.chain === e.chain)
-  ) {
-    s.relations[e.chain] = s.clock.minute;
-    s.followups.push({
-      chain: e.chain,
-      person,
-      dueAt: s.clock.minute + integer(s, 2, 7) * 1440,
-      branch: pickWeighted(s, [
-        { weight: 4, b: 'gift' },
-        { weight: 3, b: 'work' },
-        { weight: 2, b: 'request' },
-      ]).b as 'gift' | 'work' | 'request',
-      source: s.clock.minute,
-    });
+  if (revenue && units) {
+    const productionRevenue = Math.floor((revenue * producedUnits) / units);
+    s.ledger.tradeRevenue += revenue - productionRevenue;
+    s.ledger.productionRevenue += productionRevenue;
+    s.ledger.tradeCost += total - producedCost;
+    s.ledger.productionCost += producedCost;
+    s.stats.productionCostSold += producedCost;
+    s.stats.profit += revenue - total;
+  } else s.ledger.social += total;
+}
+function storyReward(
+  s: GameState,
+  reward: StoryReward = {},
+  label: string,
+  sale = false,
+) {
+  if (reward.cash) {
+    money(s, reward.cash, label);
+    if (!sale) {
+      s.ledger.workIncome += reward.cash;
+      s.stats.workIncome += reward.cash;
+    }
+  }
+  if (reward.reputation) {
+    s.reputation += reward.reputation;
+    s.stats.helped++;
+  }
+  if (reward.skill && reward.xp) gainXp(s, reward.skill, reward.xp);
+  if (reward.customer) {
+    const id = reward.customer;
+    const customer = s.commerce.customers[id] ?? {
+      met: false,
+      visited: 0,
+      lastOutcome: null,
+    };
+    customer.met = true;
+    customer.visited = Math.max(1, customer.visited);
+    s.commerce.customers[id] = customer;
+    s.commerce.relations[id] = Math.min(10, s.commerce.relations[id] + 1);
+    log(s, `结识${CUSTOMERS[id].name}，可在订单查看供货机会。`);
   }
 }
 function requireDay(s: GameState) {
   if (s.phase !== 'day' || s.event)
     throw Error('请先结束当前安排或处理眼前的遭遇');
-}
-function finishAction(s: GameState, encounter = true) {
-  if (encounter) maybeEncounter(s);
 }
 export function tradeStamina(
   s: GameState,
@@ -755,6 +753,19 @@ export function actionEnergy(s: GameState, a: Action) {
   }
 }
 function rawActionEnergy(s: GameState, a: Action) {
+  if (a.type === 'storyAction') {
+    const { c } = storyChoice(s, a.storyId, a.stage, a.choiceId);
+    const weight = Object.values(c.cost?.goods ?? {}).reduce(
+      (n, q) => n + q!,
+      0,
+    );
+    return (
+      (c.cost?.stamina ?? 0) +
+      (weight ? transportQuote(weight, 'self').stamina : 0)
+    );
+  }
+  if (a.type === 'storyBuy')
+    return transportQuote(a.quantity, a.transport ?? 'self').stamina;
   if (a.type === 'buyLot') {
     const lot = s.marketOffers.lots.find((l) => l.id === a.lotId);
     return lot
@@ -847,7 +858,7 @@ export function actionPreview(s: GameState, a: Action) {
   );
   const finishAt = s.clock.minute + duration;
   const crossesDawn = nextDailyTime(s.clock.minute, 360) <= finishAt;
-  const uncertainOutcome = a.type === 'choice';
+  const uncertainOutcome = a.type === 'choice' && !s.event?.sceneId;
   const theftRisk =
     (a.type === 'sleep' || a.type === 'closeDay') &&
     (a.bed === 'street' ||
@@ -861,6 +872,14 @@ export function actionPreview(s: GameState, a: Action) {
       o.deadlineAt >= s.clock.minute &&
       o.deadlineAt <= finishAt &&
       !(a.type === 'deliverOrder' && a.orderId === o.id),
+  );
+  const storyDeadlines = s.stories.filter(
+    (q) =>
+      q.status === 'active' &&
+      q.deadlineAt !== null &&
+      q.deadlineAt >= s.clock.minute &&
+      q.deadlineAt < finishAt &&
+      !(a.type === 'storyAction' && a.storyId === q.id),
   );
   const spoilage = result.state.logs.filter(
     (l) => l.id >= s.nextId && l.text.endsWith('已经腐坏。'),
@@ -924,7 +943,11 @@ export function actionPreview(s: GameState, a: Action) {
     confirmation:
       !!risky ||
       returning ||
-      (planning && (deadlineRisks.length > 0 || missedMeal || housingRisk)),
+      (planning &&
+        (deadlineRisks.length > 0 ||
+          storyDeadlines.length > 0 ||
+          missedMeal ||
+          housingRisk)),
     warning: [
       missedMeal ? '本次安排会错过主餐检查，健康将受损；请先安排饭食。' : '',
       housingRisk ? '本次安排期间住房将退租或停止维护，请先准备房费。' : '',
@@ -945,6 +968,10 @@ export function actionPreview(s: GameState, a: Action) {
       ...deadlineRisks.map(
         (o) =>
           `期间订单「${o.title}」于${formatMoment(o.deadlineAt)}截止，请先交货。`,
+      ),
+      ...storyDeadlines.map(
+        (q) =>
+          `期间故事「${STORY_MAP[q.definitionId].title}」于${formatMoment(q.deadlineAt!)}截止，未完成将进入事后处理。`,
       ),
       ...spoilage.map((l) => `${l.text}${l.items ?? ''}`),
       uncertainOutcome
@@ -1125,67 +1152,30 @@ function deliverOrder(
   s.commerce.customers[order.customer] = customer;
   s.story = `「${order.title}」如约交齐，收到货款${order.price}文${order.deposit ? `并取回保证金${order.deposit}文` : ''}。`;
 }
-function addIntel(
-  s: GameState,
-  t: (typeof INFO_TEMPLATES)[number],
-  world?: GameState['worlds'][number],
-) {
-  const semantic = t.semantic;
-  s.intelSeen[semantic] = s.clock.minute + 20 * 1440;
-  s.intelSeen[`skeleton:${t.skeleton}`] = s.clock.minute + 7 * 1440;
-  const due = s.day + integer(s, 2, 6);
-  const happens = random(s) < 0.72;
+function addIntel(s: GameState, world: GameState['worlds'][number]) {
+  const semantic = `market:${world.family}`;
+  s.intelSeen[semantic] = s.clock.minute + 7 * 1440;
   const entry: IntelEntry = {
-    reportVersion: 2,
-    ...(!world
-      ? {
-          resolution: {
-            due,
-            happens,
-            text: happens
-              ? t.resolved!
-              : `${t.source}摇头说：“${t.title}”没能按约落定，经手人还没有给准信；先前的说法暂时落了空。`,
-            clue: happens
-              ? t.clue!
-              : `${t.source}也只是听人转述，问到经手人的姓名，前后说法有些出入。`,
-          },
-        }
-      : {}),
-    id: `${t.id}-${s.day}-${s.nextId}`,
-    templateId: t.id,
-    title: world ? world.name : t.title,
-    category: world ? GOODS[world.good].category : t.category,
-    source: world?.source ?? t.source,
+    reportVersion: 3,
+    id: `market-${world.id}-${s.nextId++}`,
+    templateId: world.family,
+    title: world.name,
+    category: GOODS[world.good].category,
+    source: world.source,
     semantic,
-    text: world
-      ? `${world.source}说：“${WORLD_FAMILIES.find((f) => f.id === world.family)?.rumor ?? world.name} 预计第${world.expected}日前后有消息，先别把传闻当成定局。”`
-      : t.variants[integer(s, 0, 2)],
+    text: `${world.source}说：“${WORLD_FAMILIES.find((f) => f.id === world.family)?.rumor ?? world.name} 预计第${world.expected}日前后有消息，先别把传闻当成定局。”`,
     heardDay: s.day,
-    usefulUntil: world ? world.expected + 4 : due,
+    usefulUntil: world.expected + 4,
     status: 'new',
-    ...(world
-      ? { worldId: world.id, good: world.good }
-      : t.good
-        ? { good: t.good }
-        : {}),
+    worldId: world.id,
+    good: world.good,
   };
-  if (world) {
-    world.heard = true;
-  }
+  world.heard = true;
   s.intel.unshift(entry);
   s.intel = s.intel.slice(0, RULES.maxIntel);
 }
 function refreshIntelStatuses(s: GameState) {
-  for (const i of s.intel) {
-    if (i.status !== 'new' || !i.visited) continue;
-    if (i.worldId) {
-      const w = s.worlds.find((x) => x.id === i.worldId);
-      if (w && s.day >= w.start && w.truth !== 'false') i.status = 'confirmed';
-      else if (w && s.day > w.expected + 3) i.status = 'wrong';
-    } else if (i.resolution && s.day >= i.resolution.due)
-      i.status = i.resolution.happens ? 'confirmed' : 'wrong';
-    else if (s.day > i.usefulUntil) i.status = 'expired';
-  }
+  for (const i of s.intel) i.status = knownIntel(s, i).status;
 }
 
 export function operationResponse(
@@ -1578,7 +1568,14 @@ function advanceGameTime(
         if (eq) eq.jobId = null;
         const recipe = RECIPE_MAP[j.recipeId];
         gainXp(s, recipe.industry, j.quantity);
-        add(s, recipe.output, j.outputUnits, j.inputCost, 'production');
+        const stored = add(
+          s,
+          recipe.output,
+          j.outputUnits,
+          j.inputCost,
+          'production',
+        );
+        recordStoryProduction(s, recipe.output, stored);
         log(s, `${recipe.name}生产完成，已入库。`);
       }
     }
@@ -1711,6 +1708,8 @@ function dispatchInternal(
     if (expectedRevision !== state.revision)
       throw Error('操作已更新，请勿重复提交');
     if (state.phase === 'ended') throw Error('本局已经结束');
+    if (state.event && !['inspect', 'choice'].includes(action.type))
+      throw Error('请先回应眼前的意外');
     if (action.type === 'closeDay' || action.type === 'waitUntil') {
       let next = state;
       const steps: Action[] = [];
@@ -1845,7 +1844,8 @@ function dispatchInternal(
       action.type === 'trade' ||
       action.type === 'deliverOrder' ||
       action.type === 'buyLot' ||
-      action.type === 'supplyRequest'
+      action.type === 'supplyRequest' ||
+      action.type === 'storyBuy'
     ) {
       if (action.transport === 'cart' && !state.home.cart)
         throw Error('请先购买手推车');
@@ -1902,6 +1902,22 @@ function dispatchInternal(
       next.hens.some((h) => h.id === id),
     );
     expireTimedOrders(next);
+    refreshStories(next);
+    if (
+      [
+        'trade',
+        'buyLot',
+        'supplyRequest',
+        'deliverOrder',
+        'short',
+        'heavy',
+      ].includes(action.type)
+    )
+      maybeEncounter(
+        next,
+        false,
+        action.type === 'short' || action.type === 'heavy' ? 'work' : 'trade',
+      );
     if (
       (action.type === 'trade' && action.side === 'sell') ||
       action.type === 'supplyRequest' ||
@@ -2300,7 +2316,6 @@ function applyAction(
       case 'trade':
         performTrade(s, action);
         s.phase = 'day';
-        finishAction(s);
         break;
       case 'refill': {
         requireDay(s);
@@ -2317,74 +2332,140 @@ function applyAction(
             });
         s.story = `${RECIPE_MAP[action.recipeId].name}所缺原料已补齐，可以直接开工。`;
         s.phase = 'day';
-        finishAction(s);
         break;
       }
       case 'tea': {
         requireDay(s);
         if (s.teaDay === clockDay(s.life.lastDawn))
           throw Error('今天已经听过消息');
-        if (s.cash < 8) throw Error('茶钱不足');
+        const focus = action.focus ?? 'all';
+        if (!['all', 'trade', 'craft', 'neighbors'].includes(focus))
+          throw Error('请选择有效的听茶方向');
+        const available = STORIES.filter(
+          (d) => !s.stories.some((q) => q.definitionId === d.id),
+        );
+        const ranked = available
+          .map((d) => ({ d, score: random(s) + (focus === d.focus ? 2 : 0) }))
+          .sort((a, b) => b.score - a.score);
+        const world = s.worlds.find(
+          (w) =>
+            !w.heard &&
+            w.expected >= s.day &&
+            w.expected <= s.day + 14 &&
+            (s.intelSeen[`market:${w.family}`] ?? 0) <= s.clock.minute,
+        );
+        let count = 0;
+        if (ranked[0]) {
+          discoverStory(s, ranked[0].d.id, 'tea');
+          count++;
+        }
+        if (world) {
+          addIntel(s, world);
+          s.intelSeen[`market:${world.family}`] = s.clock.minute + 7 * 1440;
+          count++;
+        } else if (ranked[1]) {
+          discoverStory(s, ranked[1].d.id, 'tea');
+          count++;
+        }
+        if (!count) throw Error('暂时没有新消息，已有故事的来信会直接送到');
         money(s, -8, '茶馆听消息');
         s.ledger.living += 8;
         s.teaDay = clockDay(s.life.lastDawn);
-        const candidates: typeof INFO_TEMPLATES = [];
-        const eligible = INFO_TEMPLATES.filter(
-          (t) =>
-            (s.intelSeen[t.semantic] ?? 0) <= s.clock.minute &&
-            (s.intelSeen[`skeleton:${t.skeleton}`] ?? 0) <= s.clock.minute,
-        )
-          .map((t) => ({
-            t,
-            score:
-              random(s) +
-              (t.skill && s.skills[t.skill] > 0 ? 0.6 : 0) +
-              (t.good && quantity(s, t.good) > 0 ? 0.3 : 0) +
-              (s.intelSeen[t.semantic] === undefined ? 1 : 0),
-          }))
-          .sort((a, b) => b.score - a.score);
-        for (const { t } of eligible)
-          if (
-            candidates.length < 3 &&
-            !candidates.some((c) => c.skeleton === t.skeleton)
-          )
-            candidates.push(t);
-        if (!candidates.length) throw Error('暂时没有新消息，过些时候再来');
-        let heardMarket = false;
-        for (const t of candidates) {
-          const w = heardMarket
-            ? undefined
-            : s.worlds.find(
-                (x) =>
-                  !x.heard &&
-                  x.expected >= s.day &&
-                  x.expected <= s.day + 14 &&
-                  (s.intelSeen[`market:${x.family}`] ?? 0) <= s.clock.minute,
-              );
-          if (w) {
-            heardMarket = true;
-            s.intelSeen[`market:${w.family}`] = s.clock.minute + 7 * 1440;
-          }
-          addIntel(s, t, w);
-          const customer =
-            !w && t === candidates.at(-1) && s.day >= 4 && s.day % 7 === 0
-              ? customerOpportunity(s)
-              : undefined;
-          if (customer) {
-            const entry = s.intel[0];
-            delete entry.resolution;
-            entry.customerId = customer;
-            entry.title = `${CUSTOMERS[customer].name}正在找供货人`;
-            entry.source = CUSTOMERS[customer].name;
-            entry.category = '人物机会';
-            entry.semantic = `customer-intro:${customer}`;
-            entry.text = CUSTOMERS[customer].stories[0];
-            entry.status = 'new';
-            s.intelSeen[entry.semantic] = s.clock.minute + 20 * 1440;
+        s.story = `你听到${count}条新线索。人物故事已记在情报页，后续来信不另收茶钱。`;
+        break;
+      }
+      case 'storyRead': {
+        findStory(s, action.storyId).unread = false;
+        break;
+      }
+      case 'storyAbandon': {
+        const q = findStory(s, action.storyId);
+        if (q.status === 'ended') throw Error('故事已经结束');
+        q.history.push({
+          stage: q.stage,
+          choice: 'abandon',
+          label: '放下这条故事',
+          text: q.deadlineAt
+            ? '你主动说明不能继续履约，未交付的报酬不再有效。'
+            : '你说明无暇继续，没有接下新的承诺。',
+          at: s.clock.minute,
+        });
+        q.status = 'ended';
+        q.deadlineAt = null;
+        q.availableAt = s.clock.minute;
+        q.unread = true;
+        s.story = q.history.at(-1)!.text;
+        break;
+      }
+      case 'storyAction': {
+        const { q, c } = storyChoice(
+          s,
+          action.storyId,
+          action.stage,
+          action.choiceId,
+        );
+        if (q.deadlineAt !== null && s.clock.minute > q.deadlineAt)
+          throw Error('约定已过期，请查看后续');
+        const rewarded = q.history.some(
+          (h) => h.stage === q.stage && h.choice === c.id,
+        );
+        storyCost(s, c.cost, c.label, !rewarded ? c.reward?.cash : 0);
+        const weight = Object.values(c.cost?.goods ?? {}).reduce(
+          (n, q) => n + q!,
+          0,
+        );
+        if (weight) {
+          const carrying = transportQuote(weight, 'self').stamina;
+          if (s.stamina < carrying) throw Error('搬运体力不足');
+          s.stamina -= carrying;
+        }
+        if (!rewarded) {
+          storyReward(
+            s,
+            c.reward,
+            c.label,
+            !!Object.keys(c.cost?.goods ?? {}).length,
+          );
+          if (c.reward?.opportunity) {
+            const o = c.reward.opportunity;
+            q.opportunity = {
+              good: o.good,
+              remaining: o.quantity,
+              price: o.price,
+              expiresAt: s.clock.minute + o.days * 1440,
+            };
           }
         }
-        s.story = `你在茶馆坐了一会儿，记下${candidates.length}条新情报。出处和细节各有分量，真假要等后续动静验证。`;
-        finishAction(s);
+        recordStoryChoice(q, c, s.clock.minute);
+        s.story = c.text;
+        log(s, c.text);
+        break;
+      }
+      case 'storyBuy': {
+        const q = findStory(s, action.storyId),
+          o = q.opportunity;
+        if (
+          !o ||
+          o.expiresAt < s.clock.minute ||
+          !Number.isSafeInteger(action.quantity) ||
+          action.quantity <= 0 ||
+          action.quantity > o.remaining
+        )
+          throw Error('这项货源已到期或余量不足');
+        const units = action.quantity * 10;
+        if (reserved(s) + units > capacity(s)) throw Error('仓储空间不足');
+        const cost = action.quantity * o.price;
+        const carrying = transportQuote(
+          action.quantity,
+          action.transport ?? 'self',
+        );
+        if (s.stamina < carrying.stamina) throw Error('搬运体力不足');
+        s.stamina -= carrying.stamina;
+        money(s, -(cost + carrying.fee), '故事限量货源采购');
+        s.ledger.purchases += cost + carrying.fee;
+        add(s, o.good, units, cost + carrying.fee, 'buy');
+        o.remaining -= action.quantity;
+        s.story = `购入${GOODS[o.good].name}${action.quantity}份，支付${cost}文；这项货源还剩${o.remaining}份。`;
         break;
       }
       case 'askIntel':
@@ -2396,51 +2477,7 @@ function applyAction(
         if (!asking && !entry.asked) throw Error('请先追问出处，再回访核对');
         if (asking ? entry.asked : entry.visited)
           throw Error('这次核对已经做过');
-        if (entry.customerId) {
-          const id = entry.customerId;
-          const customer = s.commerce.customers[id] ?? {
-            met: false,
-            visited: 0,
-            lastOutcome: null,
-          };
-          if (!asking && !customer.met) throw Error('请先追问并认识这位客户');
-          if (
-            !asking &&
-            customerStage(s, id) < 2 &&
-            customer.lastOutcome !== 'failed'
-          )
-            throw Error('先完成或处理该客户的订单，再来回访');
-          if (s.stamina < 5) throw Error('核对需要5体力');
-          s.stamina -= 5;
-          customer.met = true;
-          s.commerce.customers[id] = customer;
-          if (asking) {
-            entry.asked = true;
-            customer.visited = Math.max(1, customer.visited);
-          } else {
-            entry.visited = true;
-            if (customer.lastOutcome !== 'failed')
-              customer.visited = Math.min(
-                customerStage(s, id),
-                customer.visited + 1,
-              );
-          }
-          entry.followUp =
-            !asking && customer.lastOutcome === 'failed'
-              ? CUSTOMERS[id].failure
-              : CUSTOMERS[id].stories[
-                  asking ? 0 : Math.max(0, customer.visited - 1)
-                ];
-          if (!asking && customer.lastOutcome === 'failed')
-            customer.lastOutcome = null;
-          entry.status = 'confirmed';
-          s.story = entry.followUp;
-          log(s, s.story);
-          break;
-        }
         const w = s.worlds.find((w) => w.id === entry.worldId);
-        if (!asking && entry.resolution && s.day < entry.resolution.due)
-          throw Error(`第${entry.resolution.due}日起可回访`);
         if (!asking && w && s.day <= w.expected + 3)
           throw Error(`第${w.expected + 4}日起可回访核对`);
         if (s.stamina < 5) throw Error('核对需要5体力');
@@ -2449,27 +2486,19 @@ function applyAction(
           entry.asked = true;
           if (w) w.clueKnown = true;
         } else entry.visited = true;
-        entry.followUp =
-          asking && w
+        entry.followUp = !w
+          ? '消息来源已经离开，现有记录无法继续核对。'
+          : asking
             ? w.clue
-            : w
-              ? s.day >= w.start && w.truth !== 'false'
-                ? `${w.publicText} 目前${GOODS[w.good].name}买价${quote(s, w.good).buy}文，规模仍需和此前牌价比较。`
-                : '截至回访，未见约定的公开动静；这条消息没有兑现。'
-              : asking
-                ? (entry.resolution?.clue ??
-                  '消息来源已经离开，暂时找不到更多细节。')
-                : (entry.resolution?.text ?? '这条旧消息已经无从追索。');
+            : s.day >= w.start && w.truth !== 'false'
+              ? `${w.publicText} 目前${GOODS[w.good].name}买价${quote(s, w.good).buy}文，请与此前牌价比较。`
+              : '截至回访，未见约定的公开动静；这条消息没有兑现。';
         if (!asking)
-          entry.status = entry.resolution
-            ? entry.resolution.happens
+          entry.status = !w
+            ? 'expired'
+            : s.day >= w.start && w.truth !== 'false'
               ? 'confirmed'
-              : 'wrong'
-            : w
-              ? s.day >= w.start && w.truth !== 'false'
-                ? 'confirmed'
-                : 'wrong'
-              : 'expired';
+              : 'wrong';
         s.story = entry.followUp;
         break;
       }
@@ -2490,7 +2519,6 @@ function applyAction(
         s.story = heavy
           ? '你扛起沉重的麻袋，工头按约付给你40文。'
           : '你做了半日轻活，工头递来25文。';
-        finishAction(s);
         break;
       }
       case 'rest':
@@ -2500,7 +2528,6 @@ function applyAction(
         s.stamina = Math.min(staminaMax(s), s.stamina + RULES.restStamina);
 
         s.story = '你歇脚一小时，恢复20体力；睡眠不足仍需睡觉缓解。';
-        finishAction(s, false);
         break;
       case 'snack':
         requireDay(s);
@@ -2512,7 +2539,6 @@ function applyAction(
         s.daily.snack++;
         s.stamina = Math.min(staminaMax(s), s.stamina + RULES.snackStamina);
         s.story = '你买了一份热汤，恢复15体力。';
-        finishAction(s, false);
         break;
       case 'treat':
         requireDay(s);
@@ -2536,7 +2562,6 @@ function applyAction(
           action.mode === 'fast'
             ? '郎中用药很快，风寒和伤痛都缓下来。'
             : '郎中让你喝了几剂温药，慢慢调养。';
-        finishAction(s, false);
         break;
       case 'learn': {
         requireDay(s);
@@ -2651,7 +2676,17 @@ function applyAction(
         };
         s.jobs.push(job);
         if (r.duration) eq.jobId = job.id;
-        else add(s, r.output, outputUnits, inputCost, 'production', s.day);
+        else {
+          const stored = add(
+            s,
+            r.output,
+            outputUnits,
+            inputCost,
+            'production',
+            s.day,
+          );
+          recordStoryProduction(s, r.output, stored);
+        }
         s.story = r.duration
           ? `${r.name}已开工，${r.duration * 24}小时后完成。原料和成品仓位都已锁定。`
           : `${r.name}完成，产出${GOODS[r.output].name} ×${outputUnits / 10}。`;
@@ -2771,39 +2806,48 @@ function applyAction(
         break;
       }
       case 'inspect': {
-        if (!s.event) throw Error('没有待查问的遭遇');
-        if (s.event.inspected) throw Error('已经查问过');
-        if (s.cash < 5) throw Error('查问需要5文');
-        money(s, -5, '请附近人核对经过');
-        s.event.inspected = true;
-        log(s, s.event.inspection);
+        const e = s.event,
+          scene = e?.sceneId ? SCENE_MAP[e.sceneId] : undefined;
+        if (!e || !scene) throw Error('没有待查问的现场');
+        if (e.inspected) throw Error('已经查问过');
+        if (scene.inspectCash) {
+          money(s, -scene.inspectCash, '查问现场');
+          s.ledger.social += scene.inspectCash;
+        }
+        e.inspected = true;
+        s.story = scene.inspection;
+        log(s, scene.inspection);
         break;
       }
       case 'choice': {
-        const e = s.event;
-        if (!e || e.id !== action.eventId) throw Error('这个遭遇已经处理');
-        const c = e.choices.find((x) => x.id === action.id);
+        const e = s.event,
+          scene = e?.sceneId ? SCENE_MAP[e.sceneId] : undefined;
+        if (!e || !scene || e.id !== action.eventId)
+          throw Error('这个现场已经处理');
+        const c = scene.choices.find((c) => c.id === action.id);
         if (!c) throw Error('无效选择');
-        const staminaCost = c.cost.stamina ?? 0;
-        if (s.cash < (c.cost.cash ?? 0) || s.stamina < staminaCost)
-          throw Error('资源不足，请选择其他行动');
-        if (c.cost.cash) money(s, -c.cost.cash, c.label);
-        s.stamina -= staminaCost;
-        const eligible = c.outcomes.filter(
-          (o) => s.reputation >= (o.minRep ?? -999),
-        );
-        if (!eligible.length) throw Error('此选择当前不可用');
-        const result = pickWeighted(s, eligible);
-        effect(
-          s,
-          result.effect,
-          e.person,
-          e.family === 'bargain' && result.effect.good
-            ? Math.max(0, (c.cost.cash ?? 0) - (result.effect.cash ?? 0))
-            : 0,
-        );
-        s.story = result.text;
-        log(s, result.text);
+        if (c.evidence === 'inspected' && !e.inspected)
+          throw Error('请先核实现场经过');
+        if (c.storyStage && scene.storyId && activeStories(s) >= 3)
+          throw Error('已有三条故事正在进行，可以选择告辞');
+        storyCost(s, c.cost, c.label);
+        storyReward(s, c.reward, c.label);
+        if (scene.storyId) {
+          const q = discoverStory(s, scene.storyId, 'encounter', c.storyStage);
+          q.history.push({
+            stage: STORY_MAP[scene.storyId].opening,
+            choice: 'encounter',
+            label: c.label,
+            text: c.text,
+            at: s.clock.minute,
+          });
+          if (!c.storyStage) {
+            q.stage = 'declined';
+            q.status = 'ended';
+          }
+        }
+        s.story = c.text;
+        log(s, c.text);
         s.event = null;
         break;
       }
@@ -2892,7 +2936,8 @@ export function readSave(raw: string): GameState {
   try {
     const s = JSON.parse(raw) as GameState;
     if (
-      s.saveRevision !== 4 ||
+      s.saveRevision !== 5 ||
+      !validStories(s) ||
       s.version !== 4 ||
       !validClock(s.clock) ||
       !validContinuousSave(s)

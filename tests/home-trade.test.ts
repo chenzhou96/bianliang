@@ -1,4 +1,6 @@
-import { EVENTS } from '../lib/game/content.ts';
+import { setDay } from './helpers.ts';
+import { STREET_SCENES } from '../lib/game/street-scenes.ts';
+import { maybeEncounter } from '../lib/game/engine.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -229,36 +231,24 @@ await test('首次设备设施购置须在闭店前完成，已拥有资产可�
   }
 });
 
-await test('遭遇劳动按完整工时结算且遵守营业，拒绝仍是15分钟', () => {
-  const family = EVENTS.find((f) => f.id === 'work')!;
-  for (const v of family.variants) {
-    const s = resident();
-    s.event = {
-      id: s.nextId++,
-      family: family.id,
-      variant: v.id,
-      person: v.person,
-      title: family.title,
-      text: v.texts[0],
-      clue: v.clue,
-      hiddenFact: v.fact,
-      inspection: v.inspection,
-      inspected: false,
-      choices: structuredClone(v.choices),
-    };
-    const duration = v.id === 'rain' ? 240 : 120;
-    const a = { type: 'choice', eventId: s.event.id, id: 'accept' } as const;
-    s.clock.minute = 1080 - duration;
-    const done = act(s, a);
-    assert.equal(done.clock.minute, 1080);
-    assert.equal(done.event, null);
-    s.clock.minute++;
-    const failed = dispatch(s, a);
-    assert.ok(failed.error);
-    assert.deepEqual(failed.state, s);
-    assert.equal(actionTiming(s, { ...a, id: 'decline' }).minutes, 15);
-    assert.ok(v.choices.every((c) => !/行动点|\d行动/.test(c.hint)));
-  }
+await test('现场劳动按配置完整结算，拒绝不占用游戏时间', () => {
+  const s = resident();
+  setDay(s, 2);
+  s.cooldowns = Object.fromEntries(
+    STREET_SCENES.filter((e) => e.family !== 'work').map((e) => [
+      e.family,
+      99999,
+    ]),
+  );
+  maybeEncounter(s, true, 'work');
+  assert.equal(s.event?.sceneId, 'porter-rope');
+  const a = { type: 'choice', eventId: s.event!.id, id: 'work' } as const;
+  const before = s.clock.minute,
+    done = act(s, a);
+  assert.equal(done.clock.minute, before + 60);
+  assert.equal(done.event, null);
+  assert.equal(done.cash - s.cash, 30);
+  assert.equal(actionTiming(s, { ...a, id: 'decline' }).minutes, 0);
 });
 
 await test('关系满级的客户仍能读新家宴故事，但关系不超过10且存档可恢复', () => {

@@ -10,6 +10,7 @@ import {
   XP_TO_LEVEL,
 } from './config.ts';
 import { quantity } from './engine.ts';
+import { knownStory } from './story-engine.ts';
 import {
   CUSTOMERS,
   customerStage,
@@ -169,20 +170,20 @@ export function todayTasks(s: GameState): TodayTask[] {
         target: 'people',
         preference: ['people.id', skill],
       });
-  for (const intel of s.intel)
-    if (
-      !intel.visited &&
-      ((intel.resolution && s.day >= intel.resolution.due) ||
-        (intel.worldId && s.day > intel.usefulUntil))
-    )
-      items.push({
-        id: `intel:${intel.id}`,
-        priority: 3,
-        title: `消息可回访：${intel.title ?? intel.source}`,
-        detail: '向消息来源核对后续。',
-        target: 'intel',
-        preference: ['intel.selected', intel.id],
-      });
+  for (const q of s.stories) {
+    if (q.status !== 'active' || (!q.unread && q.deadlineAt === null)) continue;
+    const view = knownStory(s, q);
+    items.push({
+      id: `story:${q.id}`,
+      priority: q.deadlineAt ? 1 : 3,
+      title: `${view.title} · ${view.chapter}`,
+      detail: q.deadlineAt
+        ? `${relativeMoment(q.deadlineAt, now)}截止；${view.objective}`
+        : view.objective,
+      target: 'intel',
+      preference: ['intel.selected', `story:${q.id}`],
+    });
+  }
   for (const id of CUSTOMER_IDS) {
     const customer = s.commerce.customers[id];
     if (

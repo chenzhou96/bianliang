@@ -3,8 +3,14 @@ import { measureLayout } from './layout-check.mjs';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { newGame, dispatch, readSave } from '../lib/game/engine.ts';
-import { EVENTS, INFO_TEMPLATES } from '../lib/game/content.ts';
+import {
+  newGame,
+  dispatch,
+  readSave,
+  maybeEncounter,
+} from '../lib/game/engine.ts';
+import { STORIES, STREET_SCENES } from '../lib/game/content.ts';
+import { discoverStory } from '../lib/game/story-engine.ts';
 import { EQUIPMENT_IDS, GOOD_IDS, GOODS, BUFFS } from '../lib/game/config.ts';
 const output = 'tests/browser-output';
 mkdirSync(output, { recursive: true });
@@ -109,7 +115,8 @@ try {
   await button('情报').click();
   await button('茶馆听消息 · 8文').click();
   const tea = await read();
-  assert.equal(new Set(tea.intel.map((i) => i.semantic)).size, 3);
+  assert.equal(tea.intel.length + tea.stories.length, 2);
+  await page.getByLabel('情报分类').selectOption('行情线索');
   assert(!tea.intel.some((i) => i.text.includes(i.semantic)));
   assert(await button('回访核对').isDisabled());
   assert.doesNotMatch(
@@ -118,7 +125,7 @@ try {
   );
   await button('追问出处').click();
   assert((await read()).intel.some((i) => i.asked));
-  assert.match(await page.locator('.detail').innerText(), /追问所得：/);
+  assert.match(await page.locator('.detail').innerText(), /核对所得：/);
   const developed = newGame(20260910, 30000);
   setDay(developed, 100);
   developed.nextId = 1200;
@@ -175,20 +182,21 @@ try {
   }));
   for (const j of developed.jobs)
     developed.equipment.find((e) => e.id === j.equipmentId).jobId = j.id;
-  developed.intel = INFO_TEMPLATES.map((t, i) => ({
+  developed.intel = developed.worlds.slice(0, 25).map((w, i) => ({
     id: `test-${i}`,
-    templateId: t.id,
-    reportVersion: 2,
-    title: t.title,
-    semantic: t.semantic,
-    category: t.category,
-    source: t.source,
-    text: t.variants[0],
+    templateId: w.family,
+    reportVersion: 3,
+    title: w.name,
+    semantic: `market:${w.family}`,
+    category: GOODS[w.good].category,
+    source: w.source,
+    text: '旧时听到的行情风声，须向来源核实。',
+    worldId: w.id,
     heardDay: 99,
     usefulUntil: 110,
-    status: 'confirmed',
-    followUp: '你回访了原来的消息来源，已经核对过经营条件。',
+    status: 'new',
   }));
+  for (const story of STORIES) discoverStory(developed, story.id, 'tea');
   developed.logs = Array.from({ length: 80 }, (_, i) => ({
     id: 1000 + i,
     day: 90 + (i % 10),
@@ -308,11 +316,13 @@ try {
       ]) {
         await button(tab).click();
         if (tab === '情报' && name === '满列表') {
+          await page.getByLabel('情报分类').selectOption('行情线索');
           assert.doesNotMatch(
             await page.locator('.detail').innerText(),
             /你回访了原来的消息来源/,
           );
-          assert(await button('回访核对').isDisabled());
+          assert.equal(await button('回访核对').count(), 0);
+          assert.match(await page.locator('.detail').innerText(), /公开进展：/);
         }
         await layout(`${w}x${h}-${name}-${tab}`);
       }
@@ -341,32 +351,18 @@ try {
       await page.getByRole('button', { name: /^入睡 · 醒于/ }).isDisabled(),
     );
     await layout(`${w}x${h}-睡眠错误`);
-    const variants = EVENTS.flatMap((f) =>
-      f.variants.map((v) => ({ f, v })),
-    ).sort(
-      (a, b) =>
-        b.v.texts[0].length +
-        b.v.clue.length +
-        b.v.inspection.length -
-        (a.v.texts[0].length + a.v.clue.length + a.v.inspection.length),
+    const encounterState = structuredClone(developed);
+    encounterState.stories = [];
+    encounterState.encounterDay = 0;
+    encounterState.cooldowns = Object.fromEntries(
+      STREET_SCENES.filter((e) => e.family !== 'eggs').map((e) => [
+        e.family,
+        999999,
+      ]),
     );
-    const { f, v } = variants[0];
-    await load({
-      ...developed,
-      event: {
-        id: 999,
-        family: f.id,
-        variant: v.id,
-        person: v.person,
-        title: f.title,
-        text: v.texts[0],
-        clue: v.clue,
-        hiddenFact: v.fact,
-        inspection: v.inspection,
-        inspected: true,
-        choices: v.choices,
-      },
-    });
+    maybeEncounter(encounterState, true);
+    encounterState.event.inspected = true;
+    await load(encounterState);
     await layout(`${w}x${h}-最长遭遇`);
     await load({ ...developed, phase: 'ended', ending: 'return' });
     await layout(`${w}x${h}-结局`);

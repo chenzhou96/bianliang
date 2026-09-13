@@ -11,11 +11,9 @@ import {
   staminaMax,
 } from '../lib/game/engine.ts';
 import { GOOD_IDS, GOODS, RECIPES, SKILL_IDS } from '../lib/game/config.ts';
-import {
-  EVENTS,
-  INFO_TEMPLATES,
-  INFO_TEMPLATES as CONTENT_INFO,
-} from '../lib/game/content.ts';
+import { STORIES } from '../lib/game/stories.ts';
+import { STREET_SCENES } from '../lib/game/street-scenes.ts';
+import { discoverStory } from '../lib/game/story-engine.ts';
 import type { Action, GameState, Good } from '../lib/game/types.ts';
 
 function act(s: GameState, a: Action) {
@@ -29,8 +27,8 @@ function night(s: GameState) {
 
 void test('v4 content and rules expose the planned long-game surface', () => {
   assert.equal(GOOD_IDS.length, 17);
-  assert.equal(CONTENT_INFO.length, 120);
-  assert.equal(INFO_TEMPLATES.length, 120);
+  assert.equal(STORIES.length, 6);
+  assert.equal(STREET_SCENES.length, 16);
   assert.equal(RECIPES.length, 7);
   assert.deepEqual(SKILL_IDS, ['husbandry', 'food', 'textile', 'brewing']);
   const low = newGame(1, 3000),
@@ -169,11 +167,7 @@ void test('meal and feed share inventory, free sleep remains available and saves
 });
 
 void test('event save does not reveal hidden facts through public state and every old event still has a decline', () => {
-  assert(
-    EVENTS.every((f) =>
-      f.variants.every((v) => v.choices.some((c) => c.id === 'decline')),
-    ),
-  );
+  assert(STREET_SCENES.every((f) => f.choices.some((c) => c.id === 'decline')));
   const s = newGame(8);
   setDay(s, 2, 540);
   s.phase = 'day';
@@ -306,36 +300,42 @@ void test('new multi-day saves round-trip and missing ledger fields are rejected
   delete broken.ledger.purchases;
   assert.throws(() => readSave(JSON.stringify(broken)));
 });
-void test('100 days of tea obey semantic and story cooldowns with actionable text', () => {
-  assert.equal(new Set(INFO_TEMPLATES.map((t) => t.semantic)).size, 120);
+void test('100 days of tea offer unique stories and real market rumors, empty visits cost nothing', () => {
   let s = newGame(88, 30000);
   s.cash = 100000;
   s.housing = { id: 'mansion', paidThrough: null, maintenanceSuspended: false };
   const seen = new Map<string, number>();
-  const skeletonSeen = new Map<string, number>();
-  let total = 0;
-  const categories = new Set<string>();
+  let rumors = 0,
+    empty = 0;
   for (let day = 1; day <= 100; day++) {
     s = act(s, { type: 'wait', minutes: 60 });
-    s = act(s, { type: 'tea' });
-    const fresh = s.intel.filter((i) => i.heardDay === day);
-    assert.equal(fresh.length, 3);
-    for (const i of fresh) {
-      const t = INFO_TEMPLATES.find((t) => t.id === i.templateId)!;
-      assert(!i.text.includes(t.semantic));
-      assert(day - (seen.get(t.semantic) ?? -99) >= 20);
-      assert(day - (skeletonSeen.get(t.skeleton) ?? -99) >= 7);
-      seen.set(t.semantic, day);
-      skeletonSeen.set(t.skeleton, day);
-      categories.add(i.category);
-      total++;
+    const before = structuredClone(s),
+      r = dispatch(s, { type: 'tea' });
+    if (r.error) {
+      assert.match(r.error, /没有新消息/);
+      assert.deepEqual(r.state, before);
+      empty++;
+    } else {
+      s = r.state;
+      for (const i of s.intel.filter((i) => i.heardDay === day)) {
+        assert.ok(i.worldId);
+        assert.equal(Object.hasOwn(i, 'resolution'), false);
+        assert(day - (seen.get(i.semantic) ?? -99) >= 7);
+        seen.set(i.semantic, day);
+        rumors++;
+      }
+      assert(
+        s.intel.filter((i) => i.heardDay === day).length +
+          s.stories.filter((q) => q.discoveredAt > before.clock.minute)
+            .length <=
+          2,
+      );
     }
-    if (s.event)
-      s = act(s, { type: 'choice', eventId: s.event.id, id: 'decline' });
     s = closeDay(s, 'mansion');
   }
-  assert.equal(total, 300);
-  assert(categories.size >= 8);
+  assert.equal(s.stories.length, 6);
+  assert.ok(rumors > 10);
+  assert.ok(empty > 10);
   assert(s.worlds.some((w) => w.expected > 120));
   assert.deepEqual(readSave(JSON.stringify(s)), s);
 });
@@ -481,38 +481,25 @@ void test('a thousand clock-driven days retain future events, resumable saves an
   assert(peak < 100000);
 });
 
-void test('city reports replace lessons and persist their own verifiable follow-up', () => {
+void test('ordinary reports are replaced by persistent playable stories with hidden later chapters', () => {
   let s = newGame(20260910);
   s.worlds = [];
   s.clock.minute = 540;
   s = act(s, { type: 'tea' });
-  s.event = null;
-  assert.equal(s.intel.length, 3);
-  assert(s.intel.every((i) => i.reportVersion === 2 && i.resolution));
-  assert(INFO_TEMPLATES.every((t) => t.id.startsWith('city-')));
-  const entry = s.intel[0];
-  const expected = structuredClone(entry.resolution!);
-  s = act(s, { type: 'askIntel', id: entry.id });
-  assert.equal(s.intel[0].followUp, expected.clue);
-  const premature = dispatch(s, { type: 'visitIntel', id: entry.id });
-  assert(premature.error);
-  assert.deepEqual(premature.state, s);
-  s = readSave(JSON.stringify(s))!;
-  assert.deepEqual(s.intel[0].resolution, expected);
-  setDay(s, expected.due, 540);
-  s = act(s, { type: 'visitIntel', id: entry.id });
-  assert.equal(s.intel[0].followUp, expected.text);
-  assert(s.intel[0].visited);
-  const repeat = dispatch(s, { type: 'visitIntel', id: entry.id });
-  assert(repeat.error);
-  const oldLesson = {
-    ...s.intel[0],
-    id: 'old-lesson',
-    reportVersion: undefined,
-    resolution: undefined,
-  };
-  s.intel.push(oldLesson);
-  assert.throws(() => readSave(JSON.stringify(s)));
+  assert.equal(s.intel.length, 0);
+  assert.equal(s.stories.length, 2);
+  const q = discoverStory(s, 'broken-eggs', 'tea');
+  s = act(s, {
+    type: 'storyAction',
+    storyId: q.id,
+    stage: q.stage,
+    choiceId: 'advance',
+  });
+  assert.equal(s.stories.find((x) => x.id === q.id)?.stage, 'letter');
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
+  const broken = structuredClone(s);
+  broken.stories[0].stage = 'old-lesson';
+  assert.throws(() => readSave(JSON.stringify(broken)));
 });
 
 void test('operation feedback records current action and exact resource changes across reloads', () => {

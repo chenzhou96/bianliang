@@ -7,8 +7,8 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 const click = async (name) => {
   await page.getByRole('button', { name, exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  if (await dialog.isVisible())
+  const confirm = page.getByRole('button', { name: '确认执行', exact: true });
+  if (await confirm.isVisible())
     await page.getByRole('button', { name: '确认执行', exact: true }).click();
 };
 const read = () =>
@@ -22,10 +22,10 @@ try {
   while ((s = await read()).phase !== 'ended' && steps++ < 1200) {
     if (s.event) {
       if (!s.event.inspected && s.cash >= 5 && inspections < 1) {
-        await click('向附近人查问 · 5文');
+        await click('核实现场经过');
         inspections++;
       }
-      await click('告辞离开');
+      await click('拱手告辞');
       continue;
     }
     if (s.cash >= s.target) {

@@ -10,7 +10,7 @@ import type {
   OperationResult,
 } from './types.ts';
 
-const NAVIGATION = new Set(['market', 'leave', 'stay']);
+const NAVIGATION = new Set(['market', 'leave', 'stay', 'storyRead']);
 export function isOperatingAction(action: Action) {
   return !NAVIGATION.has(action.type);
 }
@@ -66,6 +66,9 @@ export function actionTitle(action: Action): string {
     visitIntel: '回访消息',
     inspect: '查问遭遇',
     choice: '回应遭遇',
+    storyAction: '故事进展',
+    storyAbandon: '结束故事约定',
+    storyBuy: '购入故事货源',
     install: '安装设备',
     uninstall: '封存设备',
     sellEquipment: '出售设备',

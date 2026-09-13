@@ -1,134 +1,115 @@
 import { closeDay } from './helpers.ts';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
-import { newGame, dispatch } from '../lib/game/engine.ts';
-import { INFO_TEMPLATES } from '../lib/game/content.ts';
 import {
-  ORDER_TEMPLATES,
-  CUSTOMER_IDS,
-  CUSTOMERS,
-} from '../lib/game/commerce.ts';
+  newGame,
+  dispatch,
+  maybeEncounter,
+  readSave,
+} from '../lib/game/engine.ts';
+import { STORIES, STREET_SCENES } from '../lib/game/content.ts';
 import type { Action } from '../lib/game/types.ts';
+
+const output = 'tests/browser-output/stories';
+mkdirSync(output, { recursive: true });
 let s = newGame(20260910, 30000);
-mkdirSync('tests/browser-output/commerce', { recursive: true });
 s.cash = 100000;
 s.housing = { id: 'mansion', paidThrough: null, maintenanceSuspended: false };
 const act = (a: Action) => {
   const r = dispatch(s, a);
-  assert(!r.error, r.error);
+  assert.equal(r.error, undefined, r.error);
   s = r.state;
 };
-const visits = [];
-const category: Record<string, number> = {};
+const visits: { day: number; titles: string[]; charged: boolean }[] = [];
+const scenes: {
+  day: number;
+  title: string;
+  text: string;
+  choices: string[];
+}[] = [];
 const recent = new Map<string, number>();
-let duplicates = 0;
-let heard = 0;
-let followed = 0;
-const orderRecent = new Map<string, number>();
-const orderObservations: { day: number; titles: string[] }[] = [];
-let customerMessages = 0;
 for (let day = 1; day <= 100; day++) {
   act({ type: 'wait', minutes: 60 });
-  act({ type: 'tea' });
-  if (s.event) act({ type: 'choice', eventId: s.event.id, id: 'decline' });
+  const before = structuredClone(s),
+    tea = dispatch(s, { type: 'tea' });
+  if (tea.error) {
+    assert.match(tea.error, /没有新消息/);
+    assert.deepEqual(tea.state, before);
+  } else s = tea.state;
   const fresh = s.intel.filter((i) => i.heardDay === day);
-  const offers = s.commerce.orders.filter(
-    (o) => o.status === 'offered' && o.postedDay === day,
-  );
-  assert(offers.length <= 3);
-  for (const o of offers) {
-    assert(day - (orderRecent.get(o.templateId) ?? -99) >= 7);
-    orderRecent.set(o.templateId, day);
-  }
-  orderObservations.push({ day, titles: offers.map((o) => o.title) });
-  const customer = fresh.find((i) => i.customerId && !i.asked);
-  if (customer) {
-    act({ type: 'askIntel', id: customer.id });
-    customerMessages++;
-  }
-  assert(fresh.filter((i) => i.worldId).length <= 1);
   for (const i of fresh) {
-    if (i.worldId) {
-      const family = s.worlds.find((w) => w.id === i.worldId)!.family;
-      assert(day - (recent.get('market:' + family) ?? -99) >= 7);
-      recent.set('market:' + family, day);
-    }
-    category[i.category] = (category[i.category] ?? 0) + 1;
-    if (day - (recent.get(i.semantic) ?? -99) < 20) duplicates++;
+    assert.ok(i.worldId);
+    assert.ok(day - (recent.get(i.semantic) ?? -99) >= 7);
     recent.set(i.semantic, day);
-    if (i.worldId) heard++;
   }
-  const pending = s.intel.find(
-    (i) =>
-      !i.visited &&
-      (i.resolution
-        ? day >= i.resolution.due
-        : i.worldId && day > i.heardDay + 18),
-  );
-  if (pending) {
-    if (!pending.asked) act({ type: 'askIntel', id: pending.id });
-    act({ type: 'visitIntel', id: pending.id });
-    followed++;
+  const titles = [
+    ...fresh.map((i) => i.title!),
+    ...s.stories
+      .filter((q) => q.discoveredAt > before.clock.minute)
+      .map((q) => STORIES.find((d) => d.id === q.definitionId)!.title),
+  ];
+  assert.ok(titles.length <= 2);
+  visits.push({ day, titles, charged: !tea.error });
+  // Force only the draw for review coverage; real gameplay retains its probability.
+  maybeEncounter(s, true, day % 2 ? 'trade' : 'work');
+  if (s.event) {
+    scenes.push({
+      day,
+      title: s.event.title,
+      text: s.event.text,
+      choices: s.event.choices.map((c) => c.label),
+    });
+    act({ type: 'choice', eventId: s.event.id, id: 'decline' });
   }
-  visits.push({
-    day,
-    entries: fresh.map((i) => ({
-      title: i.title,
-      text: i.text,
-      source: i.source,
-      semantic: i.semantic,
-    })),
-  });
   s = closeDay(s, 'mansion');
+  assert.deepEqual(readSave(JSON.stringify(s)), s);
 }
-const result = {
-  templates: INFO_TEMPLATES.length,
-  uniqueSemantics: new Set(INFO_TEMPLATES.map((t) => t.semantic)).size,
-  visits: 100,
-  messages: visits.reduce((n, v) => n + v.entries.length, 0),
-  within20DayDuplicates: duplicates,
-  category,
-  marketRumors: heard,
-  revisited: followed,
-  customerMessages,
-  orderObservations,
-  orderTemplates: ORDER_TEMPLATES,
-  customerStories: CUSTOMER_IDS.map((id) => ({ id, ...CUSTOMERS[id] })),
-  visitsDetail: visits,
+const report = {
+  days: 100,
+  definitions: STORIES.length,
+  scenes: STREET_SCENES.length,
+  chargedVisits: visits.filter((v) => v.charged).length,
+  emptyVisits: visits.filter((v) => !v.charged).length,
+  uniqueStoryDiscoveries: s.stories.length,
+  visits,
+  encounters: scenes,
 };
-writeFileSync('tests/content-review.json', JSON.stringify(result, null, 2));
+writeFileSync(`${output}/content-review.json`, JSON.stringify(report, null, 2));
+const sample =
+  '# 茶馆与现场连续内容复核\n\n固定种子20260910；现场为提高审阅覆盖而强制抽取，不代表自然触发频率。\n\n' +
+  '## 前20次听茶\n\n' +
+  visits
+    .slice(0, 20)
+    .map(
+      (v) => `- 第${v.day}日：${v.titles.join('；') || '暂无新消息，不收费'}`,
+    )
+    .join('\n') +
+  '\n\n## 前20次现场\n\n' +
+  scenes
+    .slice(0, 20)
+    .map(
+      (e) =>
+        `### 第${e.day}日 · ${e.title}\n\n${e.text}\n\n选择：${e.choices.join('／')}`,
+    )
+    .join('\n\n');
+writeFileSync(`${output}/content-review.md`, sample);
 writeFileSync(
-  'tests/content-review.md',
-  '# 连续20次茶馆内容复核样本\n\n固定种子20260910，来自实际游戏引擎连续经营。\n\n' +
-    visits
-      .slice(0, 20)
-      .map(
-        (v) =>
-          `## 第${v.day}日\n\n` +
-          v.entries
-            .map((i) => `- ${i.title}（${i.source}）：${i.text}`)
-            .join('\n'),
-      )
-      .join('\n\n'),
-);
-writeFileSync(
-  'tests/browser-output/commerce/content-review.md',
-  '# 订单与人物正文审阅\n\n' +
-    ORDER_TEMPLATES.map(
-      (t) =>
-        `## ${t.title}\n\n${CUSTOMERS[t.customer].name}：${t.text}\n\n货物：${JSON.stringify(t.goods)}；解锁条件：${t.milestone ?? '基础订单'}。`,
-    ).join('\n\n') +
-    '\n\n' +
-    CUSTOMER_IDS.map(
-      (id) =>
-        `## ${CUSTOMERS[id].name}\n\n${CUSTOMERS[id].stories.map((text, i) => `### 第${i + 1}段\n\n${text}`).join('\n\n')}\n\n违约回应：${CUSTOMERS[id].failure}`,
+  `${output}/story-branches.md`,
+  '# 六条故事线正文与分支审阅\n\n' +
+    STORIES.map(
+      (d) =>
+        `## ${d.title}\n\n` +
+        d.stages
+          .map(
+            (stage) =>
+              `### ${stage.title}（${stage.id}）\n\n${stage.person}：${stage.text}\n\n目标：${stage.objective}\n\n` +
+              stage.choices
+                .map((c) => `- ${c.label} → ${c.next}：${c.text}`)
+                .join('\n'),
+          )
+          .join('\n\n'),
     ).join('\n\n'),
 );
-console.log({
-  templates: result.templates,
-  uniqueSemantics: result.uniqueSemantics,
-  duplicates,
-  category,
-  heard,
-  followed,
-});
+console.log(
+  JSON.stringify({ ...report, visits: undefined, encounters: undefined }),
+);

@@ -63,12 +63,13 @@ void test('optional tools expose only known v4 state and reject stale actions', 
   assert(signal?.aborted);
 });
 
-void test('unresolved city report outcomes stay private', () => {
+void test('undiscovered story branches stay private', () => {
   let s = newGame(12);
   s.clock.minute = 540;
   s.worlds = [];
   s = dispatch(s, { type: 'tea' }).state;
-  assert(s.intel.some((i) => i.resolution));
+  assert.equal(s.stories.length, 2);
+  assert.equal(s.intel.length, 0);
   const visible = JSON.stringify(publicState(s));
   assert(!visible.includes('resolution'));
   assert(!visible.includes('happens'));
@@ -95,17 +96,15 @@ void test('public action previews share maxima and confirmation without mutating
     action: { type: 'trade', good: 'grain', side: 'buy', quantity: 1 },
   })) as { maximum: number; revision: number };
   assert(preview.maximum > 0);
-  const porter = (await registered
-    .get('preview_bianliang_action')!
-    .execute({
-      action: {
-        type: 'trade',
-        good: 'grain',
-        side: 'buy',
-        quantity: 1,
-        transport: 'porter',
-      },
-    })) as { maximum: number };
+  const porter = (await registered.get('preview_bianliang_action')!.execute({
+    action: {
+      type: 'trade',
+      good: 'grain',
+      side: 'buy',
+      quantity: 1,
+      transport: 'porter',
+    },
+  })) as { maximum: number };
   assert.equal(porter.maximum, maximumTrade(s, 'grain', 'buy', 'porter'));
   assert.equal(preview.revision, s.revision);
   assert.deepEqual(s, original);
@@ -119,9 +118,10 @@ void test('verification requires asking and public state masks unearned legacy c
   assert.equal(tea.error, undefined);
   s = tea.state;
   s.event = null;
-  const entry = s.intel.find((i) => i.resolution)!;
+  const entry = s.intel.find((i) => i.worldId)!;
   assert(entry);
-  setDay(s, entry.resolution!.due + 1, 540);
+  const heardWorld = s.worlds.find((w) => w.id === entry.worldId)!;
+  setDay(s, heardWorld.expected + 5, 540);
   const denied = dispatch(s, { type: 'visitIntel', id: entry.id });
   assert.match(denied.error!, /先追问出处/);
   assert.equal(denied.state, s);
@@ -143,12 +143,14 @@ void test('verification requires asking and public state masks unearned legacy c
   };
   assert.equal(
     known.intelligence.find((i) => i.id === entry.id)!.status,
-    'new',
+    heardWorld.truth !== 'false' && asked.state.day >= heardWorld.start
+      ? 'confirmed'
+      : 'wrong',
   );
   const visited = dispatch(asked.state, { type: 'visitIntel', id: entry.id });
   assert.equal(visited.error, undefined);
   assert.equal(
     visited.state.intel.find((i) => i.id === entry.id)!.followUp,
-    entry.resolution!.text,
+    visited.state.story,
   );
 });
