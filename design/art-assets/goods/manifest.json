@@ -92,12 +92,13 @@
   {
     "id": "bread",
     "name": "炊饼",
-    "prompt": "Create one detailed standalone trade-good illustration for the Northern Song trading game 《汴梁归途》. Match the reference's Song painting fine ink outlines, pale watercolor/mineral washes, warm ivory textured paper and restrained earthy muted palette. Square composition target 1024x1024. A single coherent still life centered with generous margins, three-quarter view, subject occupies 65-75 percent. No people, no scenery, no frame, no text or calligraphy, no logo, no watermark, no modern objects. Flat illustrative painterly depth, not photograph or 3D. Same warm ivory paper background across the series. Clear recognizable silhouette when displayed at 48 pixels. Subject: Three plain round smooth-topped white steamed wheat buns on a small bamboo tray. Unfilled buns, no pleats, no sesame, no toasted crust, not dumplings.",
-    "source": "/Users/zhouchen/.codex/generated_images/01a0950f-9327-7422-a6c5-3e464a431d5d/exec-d9f741b6-92c9-473c-8657-3737591a5415.png",
+    "prompt": "Use case: historical-scene. Asset type: square inventory illustration for Song dynasty Chinese management game. Paint Chinese 炊饼 steamed wheat bread in a shallow bamboo tray: one distinctly cylindrical flat-bottom steamed loaf with torn open top and one torn half in foreground showing fluffy porous white wheat crumb, irregular torn fibers and many little air holes. It must unmistakably look like steamed bread, not smooth eggs, not egg yolks, not stuffed buns, not baked brown western bread. Fine traditional Chinese ink outlines and pale watercolor on warm ivory parchment background, restrained warm palette, centered composition occupying 80% canvas, matching hand-painted historical game item art. No text or watermark.",
+    "source": "design/art-assets/goods/bread-v1.png",
     "size": [
       1254,
       1254
-    ]
+    ],
+    "generation": "2026-09-13 built-in imagegen replacement; see bread-replacement.md"
   },
   {
     "id": "hen",

@@ -1,3 +1,4 @@
+import { recordCash, validCashHistory } from './ledger.ts';
 import { productionEarliest } from './production-time.ts';
 import { formatMoment } from './time.ts';
 import { statusActive, STATUS_DURATION } from './status.ts';
@@ -36,6 +37,7 @@ import {
 } from './time.ts';
 import {
   BUFFS,
+  MEALS,
   EQUIPMENT,
   EQUIPMENT_IDS,
   GOODS,
@@ -168,6 +170,7 @@ function money(s: GameState, amount: number, text: string) {
   const value = amount === 0 ? 0 : Math.round(amount);
   if (value < 0 && s.cash < -value) throw Error('现金不足');
   s.cash += value;
+  recordCash(s, value);
   log(s, text, value);
 }
 function add(
@@ -316,6 +319,7 @@ function emptySkills(): Record<SkillId, number> {
 }
 function emptyLedger() {
   return {
+    dailyCash: [] as import('./types.ts').DailyCash[],
     depositsPaid: 0,
     depositsReturned: 0,
     depositLosses: 0,
@@ -357,7 +361,7 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
       lastDawn: 360,
       wakeSummary: null,
     },
-    saveRevision: 3,
+    saveRevision: 4,
     operationHistory: [],
     version: 4,
     rules: RULES.version,
@@ -712,8 +716,16 @@ export function maximumProduction(s: GameState, recipeId: string) {
   return 0;
 }
 
+export function suggestedMeal(s: GameState) {
+  return quantity(s, 'bread') >= 1
+    ? 'bread'
+    : quantity(s, 'grain') >= 1
+      ? 'grain'
+      : 'diner';
+}
+
 export function reservedFood(s: GameState, good: Good) {
-  const meal = quantity(s, 'bread') >= 1 ? 'bread' : 'diner';
+  const meal = suggestedMeal(s);
   return (
     (s.life.ateCycle !== lifeCycle(s.clock.minute) && meal === good ? 1 : 0) +
     (good === 'grain'
@@ -2182,20 +2194,22 @@ function applyAction(
         feedHens(s, action.count);
         break;
       case 'eat': {
-        const costs = { bread: 10, egg: 20, saltedEgg: 10, grain: 10 };
-        let cost = 0;
-        if (action.meal === 'diner') {
-          money(s, -18, '食肆主餐');
-          cost = 18;
-        } else {
-          if (!(action.meal in costs)) throw Error('请选择有效的饭食');
-          cost = consume(s, action.meal, costs[action.meal]).cost;
+        if (!Object.hasOwn(MEALS, action.meal)) throw Error('请选择有效的饭食');
+        const meal = MEALS[action.meal];
+        let cost = meal.cash;
+        if (meal.cash) money(s, -meal.cash, meal.name);
+        for (const [good, amount] of Object.entries(meal.ingredients)) {
+          if (quantity(s, good as Good) < amount)
+            throw Error(
+              `${meal.name}需要${GOODS[good as Good].name}${amount}${GOODS[good as Good].unit}`,
+            );
+          cost += consume(s, good as Good, amount * 10).cost;
         }
         s.ledger.living += cost;
-        if (s.life.ateCycle !== lifeCycle(s.clock.minute))
-          s.health = Math.min(100, s.health + 2);
+        const firstMeal = s.life.ateCycle !== lifeCycle(s.clock.minute);
+        if (firstMeal) s.health = Math.min(100, s.health + meal.health);
         s.life.ateCycle = lifeCycle(s.clock.minute);
-        s.story = '用过主餐，本生活周期的饮食已满足。';
+        s.story = `用过${meal.name}，本生活周期的饮食已满足。${firstMeal ? '' : '本周期已用过主餐，不再增加健康。'}`;
         break;
       }
       case 'acceptOrder': {
@@ -2878,14 +2892,12 @@ export function readSave(raw: string): GameState {
   try {
     const s = JSON.parse(raw) as GameState;
     if (
-      s.saveRevision !== 3 ||
+      s.saveRevision !== 4 ||
       s.version !== 4 ||
       !validClock(s.clock) ||
       !validContinuousSave(s)
     )
       throw Error();
-    s.saveRevision = 3;
-    s.operationHistory ??= [];
     if (!Array.isArray(s.operationHistory)) throw Error();
     s.operationHistory = s.operationHistory.slice(-50);
     for (const result of s.operationHistory) {
@@ -2959,13 +2971,6 @@ export function readSave(raw: string): GameState {
       )
         throw Error();
     }
-    s.ledger.depositsPaid ??= 0;
-    s.ledger.depositsReturned ??= 0;
-    s.ledger.depositLosses ??= 0;
-    if (!s.commerce) {
-      s.commerce = newCommerce(s);
-      updateMilestones(s);
-    }
     const model = newGame(0);
     model.buffs = {};
     const shape = (v: unknown, t: unknown): boolean => {
@@ -2992,6 +2997,7 @@ export function readSave(raw: string): GameState {
     };
     if (
       !shape(s, model) ||
+      !validCashHistory(s) ||
       !validCommerce(s) ||
       s.version !== 4 ||
       s.rules !== RULES.version ||

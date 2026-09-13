@@ -4,10 +4,10 @@
 
 ## 当前设计与实现
 
-- [美术工作台与单层导航](plans/FLAT_WORKBENCH_PLAN.md)：封面铺满、紧凑详情、同页分区与图标说明；为最新界面约定。
+- [美术工作台与单层导航](plans/FLAT_WORKBENCH_PLAN.md)：封面铺满、紧凑详情、同页分区与图标说明；保留工作台总体设计，后续菜单、操作分组与账本优化以最新验收报告为准。
 
 - [美术版界面实施](plans/ART_INTERFACE_PLAN.md)：场景、商品、设备、住宅状态与布局验收。
-- [美术素材库](../design/art-assets/README.md)：34 张原图、预览、提示词与网页派生清单。
+- [美术素材库](../design/art-assets/README.md)：35 张原图、预览、提示词与网页派生清单。
 
 - [时间与日常经营体验更新方案](plans/TIME_EXPERIENCE_UPDATE_PLAN.md)：v4疲劳、营业收尾、收工与目标等待及验收标准。
 
@@ -16,6 +16,8 @@
 - [首日沉浸体验更新](reports/IMMERSIVE_UX_UPDATE.md)：街巷招工、时辰表、住宅分组、跨日文案与按钮对齐。
 
 ## 历史归档
+
+- [细节优化前验收记录](archive/TEST_REPORT_PRE_DETAIL_REFINEMENTS.md)：工作台、初版美术与v4时间系统的原始验收结论。
 
 - [时间体验更新前验收报告](archive/TEST_REPORT_PRE_TIME_EXPERIENCE.md)：v3与首日体验的原始验证记录。
 

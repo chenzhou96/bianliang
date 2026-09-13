@@ -92,6 +92,16 @@ void test('old and future saves are rejected, while continuous actions retain bo
     () => readSave(JSON.stringify({ ...s, saveRevision: 999 })),
     /版本不兼容/,
   );
+  for (const field of ['operationHistory', 'commerce'] as const) {
+    const incomplete = JSON.parse(JSON.stringify(s));
+    delete incomplete[field];
+    assert.throws(() => readSave(JSON.stringify(incomplete)));
+  }
+  for (const field of ['depositsPaid', 'depositsReturned', 'depositLosses']) {
+    const incomplete = JSON.parse(JSON.stringify(s));
+    delete incomplete.ledger[field];
+    assert.throws(() => readSave(JSON.stringify(incomplete)));
+  }
   for (let i = 0; i < 60; i++) {
     s.stamina = 60;
     s.health = 100;

@@ -1,5 +1,6 @@
 'use client';
 import Image from 'next/image';
+import { LedgerOverview } from './ledger-overview';
 import { productionCompletionLabel } from '@/lib/game/production-time';
 import {
   publicOpportunities,
@@ -54,6 +55,7 @@ import {
 } from '@/components/ui/dialog';
 import { PersistentAssets, RecordFeed } from '@/components/game-shell';
 import {
+  suggestedMeal,
   newGame,
   dispatch,
   quantity,
@@ -75,6 +77,7 @@ import {
   availableSurplus,
 } from '@/lib/game/engine';
 import {
+  MEALS,
   GOODS,
   GOOD_IDS,
   HOUSING,
@@ -223,16 +226,6 @@ function Do({
           onClick={() => act({ type: 'waitUntil', target: p.earlierTarget! })}
         >
           先等到可交货时刻
-        </Btn>
-      )}
-      {action.type === 'rest' && p.error && (
-        <Btn
-          subtle
-          onClick={() =>
-            act({ type: 'waitUntil', target: { kind: 'morning' } })
-          }
-        >
-          等到08:00
         </Btn>
       )}
       {p.error && <small className="reason">{p.error}</small>}
@@ -1063,30 +1056,34 @@ function Production({ s, act }: Props) {
                   {r.duration ? r.duration * 24 + '小时' : '当日完成'} · 保质
                   {r.shelfLife ? r.shelfLife + '日' : '无限制'}
                 </small>
-                <label className="quantity">
-                  加工批量
-                  <input
-                    aria-label={r.name + '批量'}
-                    type="number"
-                    min="1"
-                    max="20"
-                    value={count}
-                    onChange={(e) => setCount(e.target.value)}
-                  />
-                </label>
-                <div className="quick-quantity">
-                  <Btn subtle onClick={() => setCount('1')}>
-                    1批
-                  </Btn>
-                  <Btn subtle onClick={() => setCount('5')}>
-                    5批
-                  </Btn>
-                  <Btn
-                    subtle
-                    onClick={() => setCount(String(maximumProduction(s, r.id)))}
-                  >
-                    当前最多可做
-                  </Btn>
+                <div className="production-quantity">
+                  <label className="quantity">
+                    加工批量
+                    <input
+                      aria-label={r.name + '批量'}
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={count}
+                      onChange={(e) => setCount(e.target.value)}
+                    />
+                  </label>
+                  <div className="quick-quantity">
+                    <Btn subtle onClick={() => setCount('1')}>
+                      1批
+                    </Btn>
+                    <Btn subtle onClick={() => setCount('5')}>
+                      5批
+                    </Btn>
+                    <Btn
+                      subtle
+                      onClick={() =>
+                        setCount(String(maximumProduction(s, r.id)))
+                      }
+                    >
+                      当前最多可做
+                    </Btn>
+                  </div>
                 </div>
                 {costing && (
                   <>
@@ -1527,7 +1524,7 @@ function People({ s, act }: Props) {
                     act={act}
                     action={{
                       type: 'eat',
-                      meal: quantity(s, 'bread') ? 'bread' : 'diner',
+                      meal: suggestedMeal(s),
                     }}
                   >
                     用主餐 · 30分钟
@@ -1947,61 +1944,13 @@ function StatusEffects({ s }: { s: GameState }) {
 }
 
 function Ledger({ s }: Props) {
-  const l = s.ledger;
-  const logs = [...s.logs].reverse();
   return (
     <Frame
       title="账本"
-      note={`修正分类账从第${l.sinceDay}日起记录；现金流与毛利分开。`}
+      note="看收支，知盈亏。每一笔来往可在完整记录中查阅。"
+      className="ledger-workbench"
     >
-      <div className="split">
-        <div className="ledger-grid">
-          {[
-            ['贸易毛利', l.tradeRevenue - l.tradeCost],
-            ['生产毛利', l.productionRevenue - l.productionCost],
-            ['采购支出', l.purchases],
-            ['劳动收入', l.workIncome],
-            ['学费', l.tuition],
-            ['设备 / 回收', `${money(l.equipment)} / ${money(l.returns)}`],
-            ['住宅 / 生活', `${money(l.housing)} / ${money(l.living)}`],
-            ['交际开支', money(l.social)],
-            ['饲料 / 医疗', `${money(l.feed)} / ${money(l.medical)}`],
-            ['损耗', l.losses],
-            [
-              '冻结保证金',
-              s.commerce.orders
-                .filter((o) => o.status === 'accepted')
-                .reduce((n, o) => n + o.deposit, 0),
-            ],
-            [
-              '保证金缴付 / 返还',
-              `${money(l.depositsPaid)} / ${money(l.depositsReturned)}`,
-            ],
-            ['违约损失', l.depositLosses],
-          ].map(([k, v]) => (
-            <div key={k}>
-              <span>{k}</span>
-              <strong>{typeof v === 'number' ? money(v) : v}</strong>
-            </div>
-          ))}
-        </div>
-        <aside className="detail">
-          <h2>近期流水</h2>
-          <div className="log-list">
-            {logs.map((x) => (
-              <div className="log" key={x.id}>
-                <small>
-                  第{x.day}日 {x.cash ? money(x.cash) : ''}
-                </small>
-                <TextPages
-                  text={x.text + (x.items ? ' ' + x.items : '')}
-                  size={65}
-                />
-              </div>
-            ))}
-          </div>
-        </aside>
-      </div>
+      <LedgerOverview s={s} />
     </Frame>
   );
 }
@@ -2036,9 +1985,7 @@ function Street({ s, act }: Props) {
     navigate('housing');
   };
   const short = actionPreview(s, { type: 'short' });
-  const next = citySchedule(s.clock.minute)[0];
-  const waitForNight = s.clock.minute % 1440 < 1080;
-  const waitAt = nextDailyTime(s.clock.minute, waitForNight ? 1080 : 480);
+  const night = ['evening', 'late'].includes(dayPeriod(s.clock.minute));
   const offers = publicOpportunities(s);
   const deliverable = offers.requests.find(
     (r) =>
@@ -2051,28 +1998,10 @@ function Street({ s, act }: Props) {
     <Frame
       className="street-panel"
       title="此刻的汴梁"
-      note={`第${s.day}日 ${formatClock(s.clock.minute)} · 下一件城中变化：${relativeMoment(next.at, s.clock.minute)}，${next.text}。`}
+      note="沿街听吆喝，择一桩事慢慢做。"
     >
       <div className="split street-body">
         <div className="list-column">
-          <SceneArt scene="street" className="street-scene">
-            <span className="scene-kicker">东京 · 市井之间</span>
-            <strong>今日从哪里开始？</strong>
-            <div className="scene-destinations">
-              <button onClick={() => navigate('market')}>
-                逛州桥市 <small>行情与买卖</small>
-              </button>
-              <button onClick={() => navigate('intel')}>
-                去茶馆 <small>09:00—21:00</small>
-              </button>
-              <button onClick={goHome}>
-                回住所 <small>饭食与歇息</small>
-              </button>
-              <button onClick={() => navigate('production')}>
-                进作坊 <small>手艺与生产</small>
-              </button>
-            </div>
-          </SceneArt>
           <section className="detail">
             <h2>招工告示</h2>
             <p>
@@ -2175,27 +2104,27 @@ function Street({ s, act }: Props) {
             ))}
           </section>
         </div>
-        <aside className="detail">
-          <CitySchedule s={s} />
-          <h2>有想等的时辰</h2>
-          <p>等候会推进保鲜、房费和疲劳；有临近交期时，先处理手头的事。</p>
-          <Do
-            s={s}
-            act={act}
-            action={{
-              type: 'waitUntil',
-              target: {
-                kind: 'opening',
-                venue: waitForNight ? 'nightMarket' : 'market',
-              },
-            }}
-          >
-            等到
-            {relativeMoment(waitAt, s.clock.minute)}
-            {waitForNight ? '夜市开张' : '早市开门'}
-          </Do>
-          <Btn onClick={goHome}>回住所歇息</Btn>
-        </aside>
+        <SceneArt
+          scene={night ? 'night-market' : 'street'}
+          className="street-scene"
+        >
+          <span className="scene-kicker">东京 · 市井之间</span>
+          <strong>{night ? '灯火深处，市声未歇' : '一城烟火，半日闲忙'}</strong>
+          <div className="scene-destinations">
+            <button onClick={() => navigate('market')}>
+              逛州桥市 <small>行情与买卖</small>
+            </button>
+            <button onClick={() => navigate('intel')}>
+              去茶馆 <small>09:00—21:00</small>
+            </button>
+            <button onClick={goHome}>
+              回住所 <small>饭食与歇息</small>
+            </button>
+            <button onClick={() => navigate('production')}>
+              进作坊 <small>手艺与生产</small>
+            </button>
+          </div>
+        </SceneArt>
       </div>
     </Frame>
   );
@@ -2210,7 +2139,7 @@ const LifeContext = createContext<{
   preferences: LifePreferences;
   update: (key: keyof LifePreferences, value: string | boolean) => void;
 }>({
-  preferences: { meal: 'diner', bed: 'inn', eatFirst: true },
+  preferences: { meal: 'bread', bed: 'inn', eatFirst: true },
   update: () => {},
 });
 function LifePreferencesProvider({
@@ -2223,7 +2152,7 @@ function LifePreferencesProvider({
   const key = `life.${s?.seed ?? 0}`;
   const [meal, setMeal] = useWorkspaceValue<Exclude<Meal, 'none'>>(
     `${key}.meal`,
-    'diner',
+    'bread',
   );
   const [bed, setBed] = useWorkspaceValue<Bed>(
     `${key}.bed`,
@@ -2248,28 +2177,13 @@ function LifePreferencesProvider({
     </LifeContext.Provider>
   );
 }
-function CloseDayButton({
-  s,
-  act,
-  compact = false,
-}: Props & { compact?: boolean }) {
+function CloseDayButton({ s, act }: Props) {
   const { preferences } = useContext(LifeContext);
   const action: Action = {
     type: 'closeDay',
     bed: preferences.bed,
     ...(preferences.eatFirst ? { meal: preferences.meal } : {}),
   };
-  if (compact)
-    return (
-      <div className="compact-close">
-        <Btn
-          disabled={!!actionPreview(s, action).error}
-          onClick={() => act(action)}
-        >
-          按当前安排收工
-        </Btn>
-      </div>
-    );
   return (
     <Do s={s} act={act} action={action}>
       今日收工 ·{' '}
@@ -2298,96 +2212,115 @@ function LifeControls({ s, act }: Props) {
       <div className="life-primary">
         <section className="life-section">
           <h3>饭食与短休</h3>
-          <select
-            aria-label="主餐"
-            value={meal}
-            onChange={(e) => update('meal', e.target.value)}
-          >
-            <option value="diner">食肆18文</option>
-            <option value="bread">炊饼一个</option>
-            <option value="egg">鸡蛋两枚</option>
-            <option value="saltedEgg">咸蛋一个</option>
-            <option value="grain">粟米一份</option>
-          </select>
-          <Do s={s} act={act} action={{ type: 'eat', meal }}>
-            用主餐 · 30分钟
-          </Do>
-          <Do s={s} act={act} action={{ type: 'rest' }}>
-            休息1小时
-          </Do>
+          <div className="life-choice">
+            <small>自备饭食扣库存；健康收益每周期仅首次用餐生效。</small>
+            <select
+              aria-label="主餐"
+              value={meal}
+              onChange={(e) => update('meal', e.target.value)}
+            >
+              {Object.entries(MEALS).map(([id, option]) => (
+                <option key={id} value={id}>
+                  {option.name}
+                  {option.cash ? ` · ${option.cash}文` : ''}
+                </option>
+              ))}
+            </select>
+            <small>{MEALS[meal].description}</small>
+          </div>
+          <div className="life-action-stack">
+            <Do s={s} act={act} action={{ type: 'eat', meal }}>
+              用主餐 · 30分钟
+            </Do>
+            <Do s={s} act={act} action={{ type: 'rest' }}>
+              休息1小时
+            </Do>
+          </div>
         </section>
         <section className="life-section">
           <h3>今日收工</h3>
-          <select
-            aria-label="住宿"
-            value={validBed ? bed : ''}
-            onChange={(e) => update('bed', e.target.value)}
-          >
-            {!validBed && (
-              <option value="" disabled>
-                原住所已失效，请重新选择
-              </option>
-            )}
-            <option value="inn">客栈30文</option>
-            <option value="temple">庙廊（有失窃风险）</option>
-            <option value="street">街头（有失窃与健康风险）</option>
-            {s.housing.id !== 'street' && (
-              <option value={s.housing.id}>{HOUSING[s.housing.id].name}</option>
-            )}
-          </select>
-          <label className="auto-feed-setting">
-            <input
-              type="checkbox"
-              checked={eatFirst}
-              onChange={(e) => update('eatFirst', e.target.checked)}
-            />
-            先吃所选主餐（已经吃过则省略）
-          </label>
-          <CloseDayButton s={s} act={act} />
-          <Do
-            s={s}
-            act={act}
-            action={{ type: 'waitUntil', target: { kind: 'morning' } }}
-          >
-            等到08:00
-          </Do>
+          <div className="life-choice">
+            <select
+              aria-label="住宿"
+              value={validBed ? bed : ''}
+              onChange={(e) => update('bed', e.target.value)}
+            >
+              {!validBed && (
+                <option value="" disabled>
+                  原住所已失效，请重新选择
+                </option>
+              )}
+              <option value="inn">客栈30文</option>
+              <option value="temple">庙廊（有失窃风险）</option>
+              <option value="street">街头（有失窃与健康风险）</option>
+              {s.housing.id !== 'street' && (
+                <option value={s.housing.id}>
+                  {HOUSING[s.housing.id].name}
+                </option>
+              )}
+            </select>
+            <label className="auto-feed-setting">
+              <input
+                type="checkbox"
+                checked={eatFirst}
+                onChange={(e) => update('eatFirst', e.target.checked)}
+              />
+              先吃所选主餐（已经吃过则省略）
+            </label>
+          </div>
+          <div className="life-action-stack">
+            <CloseDayButton s={s} act={act} />
+          </div>
         </section>
       </div>
       <details className="life-secondary">
         <summary>午休、自选睡眠与等待</summary>
-        <div className="actions">
-          <input
-            aria-label="睡眠小时"
-            type="number"
-            min="1"
-            max="10"
-            value={hours}
-            onChange={(e) => setHours(e.target.value)}
-          />
-          <Do
-            s={s}
-            act={act}
-            action={{ type: 'sleep', minutes: Number(hours) * 60, bed }}
-          >
-            入睡 · 醒于
-            {relativeMoment(
-              s.clock.minute + Number(hours) * 60,
-              s.clock.minute,
-            )}
-          </Do>
-          <Do s={s} act={act} action={{ type: 'wait', minutes: 30 }}>
-            等待30分钟
-          </Do>
-          <Do
-            s={s}
-            act={act}
-            action={{
-              type: 'waitUntil',
-              target: { kind: 'opening', venue: 'nightMarket' },
-            }}
-          >
-            等到夜市开张
-          </Do>
+        <div className="life-secondary-grid">
+          <section>
+            <div className="control-group-title">
+              <h3>自选睡眠</h3>
+              <label className="sleep-duration">
+                小时
+                <input
+                  aria-label="睡眠小时"
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={hours}
+                  onChange={(e) => setHours(e.target.value)}
+                />
+              </label>
+            </div>
+            <Do
+              s={s}
+              act={act}
+              action={{ type: 'sleep', minutes: Number(hours) * 60, bed }}
+            >
+              入睡 · 醒于
+              {relativeMoment(
+                s.clock.minute + Number(hours) * 60,
+                s.clock.minute,
+              )}
+            </Do>
+          </section>
+          <section>
+            <div className="control-group-title">
+              <h3>只等不睡</h3>
+            </div>
+            <Do s={s} act={act} action={{ type: 'wait', minutes: 30 }}>
+              等待30分钟
+            </Do>
+            <Do
+              s={s}
+              act={act}
+              action={{
+                type: 'waitUntil',
+                target: { kind: 'opening', venue: 'nightMarket' },
+              }}
+            >
+              等到夜市开张
+            </Do>
+          </section>
         </div>
       </details>
       {s.hens.length > 0 && (
@@ -2472,13 +2405,11 @@ export default function Home() {
   const [saved, setSaved] = useState<GameState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [rawExists, setRawExists] = useState(false);
-  const [oldKeys, setOldKeys] = useState<string[]>([]);
   const [, setError] = useState('');
   const [, setFeedback] = useState('');
   const [result, setResult] = useState<OperationResult>();
   const [todayOpen, setTodayOpen] = useState(false);
   const [navigationRevision, setNavigationRevision] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
   const [dismissedCelebration, setDismissedCelebration] = useState(-1);
   const [storageError, setStorageError] = useState('');
   const [tab, setTab] = useState<Tab>('market');
@@ -2493,16 +2424,6 @@ export default function Home() {
     setS(next);
     setRawExists(true);
     try {
-      const previous = localStorage.getItem(SAVE);
-      const backupKey = `${SAVE}-before-ux-revision-2`;
-      if (
-        previous &&
-        JSON.parse(previous).saveRevision !== 3 &&
-        !localStorage.getItem(backupKey)
-      ) {
-        localStorage.setItem(backupKey, previous);
-        setOldKeys((keys) => [...new Set([...keys, backupKey])]);
-      }
       localStorage.setItem(SAVE, JSON.stringify(next));
       setStorageError('');
     } catch {
@@ -2514,15 +2435,7 @@ export default function Home() {
       try {
         const raw = localStorage.getItem(SAVE);
         setRawExists(!!raw);
-        setOldKeys(
-          Object.keys(localStorage).filter(
-            (k) => /bianliang.*save|save.*bianliang/.test(k) && k !== SAVE,
-          ),
-        );
         if (raw) setSaved(readSave(raw));
-        setReduceMotion(
-          localStorage.getItem('bianliang-reduce-motion') === 'true',
-        );
       } catch (e) {
         setStorageError((e as Error).message);
       }
@@ -2610,11 +2523,10 @@ export default function Home() {
     if (rawExists || s) setRestart(target);
     else start(target);
   };
-  const download = (key = SAVE) => {
-    const raw =
-      key === SAVE && ref.current
-        ? JSON.stringify(ref.current)
-        : localStorage.getItem(key);
+  const download = () => {
+    const raw = ref.current
+      ? JSON.stringify(ref.current)
+      : localStorage.getItem(SAVE);
     if (!raw) {
       setError('没有可导出的存档');
       return;
@@ -2624,7 +2536,7 @@ export default function Home() {
     );
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${key}-${Date.now()}.json`;
+    a.download = `${SAVE}-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -2664,7 +2576,7 @@ export default function Home() {
         <NavigationContext.Provider value={navigate}>
           <main
             data-period={s ? dayPeriod(s.clock.minute) : 'day'}
-            className={`game ${s ? 'playing' : 'welcome'} ${reduceMotion ? 'reduce-motion' : ''}`}
+            className={`game ${s ? 'playing' : 'welcome'}`}
           >
             <header className="masthead">
               <div className="brand">
@@ -2672,34 +2584,11 @@ export default function Home() {
                 <small>长期经营手记</small>
               </div>
               <div className="toolbar">
-                <label className="motion-setting">
-                  <input
-                    type="checkbox"
-                    checked={reduceMotion}
-                    onChange={(e) => {
-                      setReduceMotion(e.target.checked);
-                      try {
-                        localStorage.setItem(
-                          'bianliang-reduce-motion',
-                          String(e.target.checked),
-                        );
-                      } catch {
-                        /* Preferences do not affect game saves. */
-                      }
-                    }}
-                  />
-                  减少动态
-                </label>
                 {(rawExists || s) && (
                   <Btn subtle onClick={() => download()}>
-                    导出存档
+                    导出备份
                   </Btn>
                 )}
-                {oldKeys.map((k) => (
-                  <Btn key={k} subtle onClick={() => download(k)}>
-                    {k.includes('before-') ? '导出修复前备份' : '导出旧版存档'}
-                  </Btn>
-                ))}
                 {s && (
                   <Btn subtle onClick={() => requestStart(s.target)}>
                     重新开始
@@ -2751,42 +2640,10 @@ export default function Home() {
                     挑战三万文
                   </Btn>
                 </div>
-                <small>新局会在确认后替换当前进度；旧版存档单独保留。</small>
+                <small>重新开始会替换当前进度，请先导出需要保留的备份。</small>
               </section>
             ) : (
               <>
-                <div className="city-clock-note">
-                  <span title="清醒累积疲劳，睡眠每分钟消除2分钟负荷；超过16小时才累积睡眠债，超过18小时劳动更费力，超过24小时损害健康。">
-                    {fatigueLabel(s.clock.fatigueMinutes)}
-                  </span>
-                  <span>
-                    {relativeMoment(
-                      citySchedule(s.clock.minute).filter((item) =>
-                        /开门|开张|受理|打烊/.test(item.text),
-                      )[0].at,
-                      s.clock.minute,
-                    )}{' '}
-                    ·{' '}
-                    {
-                      citySchedule(s.clock.minute).filter((item) =>
-                        /开门|开张|受理|打烊/.test(item.text),
-                      )[0].text
-                    }
-                  </span>
-                  <button
-                    className="text-button"
-                    onClick={() => setTodayOpen(true)}
-                  >
-                    时辰表与今日要事
-                  </button>
-                  <button
-                    className="text-button"
-                    disabled={!!s.event || s.phase === 'ended'}
-                    onClick={() => navigate('street')}
-                  >
-                    此刻能做什么 · 招工告示
-                  </button>
-                </div>
                 <section className="status">
                   <div>
                     <span>
@@ -2859,14 +2716,20 @@ export default function Home() {
                     />
                   </div>
                   <StatusEffects s={s} />
-                  <Btn
-                    subtle
-                    onClick={() => {
-                      setTodayOpen(true);
-                    }}
-                  >
-                    今日要事 ({tasks.length})
-                  </Btn>
+                  {!s.event && s.phase !== 'ended' && s.cash >= s.target ? (
+                    <Btn onClick={() => act({ type: 'return' })}>
+                      支付{money(s.target)}归航
+                    </Btn>
+                  ) : (
+                    <Btn
+                      subtle
+                      onClick={() => {
+                        setTodayOpen(true);
+                      }}
+                    >
+                      今日要事 ({tasks.length})
+                    </Btn>
+                  )}
                 </section>
                 <div className="game-layout">
                   <PersistentAssets s={s} onAssets={() => navigate('assets')} />
@@ -2946,65 +2809,41 @@ export default function Home() {
                         <Ledger s={s} act={act} />
                       )}
                     </div>
-                    <footer className="bottom-bar">
-                      <div className="actions">
-                        {!s.event &&
-                          s.phase !== 'ended' &&
-                          s.cash >= s.target && (
-                            <Do s={s} act={act} action={{ type: 'return' }}>
-                              支付{money(s.target)}归航
-                            </Do>
-                          )}
-                        {!s.event && s.phase === 'day' && (
-                          <>
-                            {tab === 'housing' ? (
-                              <CloseDayButton s={s} act={act} compact />
-                            ) : (
-                              <Btn
-                                onClick={() => {
-                                  setWorkspacePreference(
-                                    'housing.view',
-                                    '生活',
-                                  );
-                                  navigate('housing');
-                                }}
-                              >
-                                回住所安排生活
-                              </Btn>
-                            )}
-                            <details className="footer-wait">
-                              <summary>等待安排</summary>
-                              <Do
-                                s={s}
-                                act={act}
-                                action={{ type: 'wait', minutes: 30 }}
-                              >
-                                等待30分钟
-                              </Do>
-                              <Do
-                                s={s}
-                                act={act}
-                                action={{
-                                  type: 'waitUntil',
-                                  target: {
-                                    kind: 'opening',
-                                    venue:
-                                      s.clock.minute % 1440 < 1080
-                                        ? 'nightMarket'
-                                        : 'market',
-                                  },
-                                }}
-                              >
-                                等到下一场货市
-                              </Do>
-                            </details>
-                          </>
-                        )}
-                      </div>
-                    </footer>
                   </div>
                   <RecordFeed s={s} current={currentResult} />
                 </div>
+                <footer className="city-clock-note" aria-label="汴梁时辰">
+                  <span title="清醒累积疲劳，睡眠每分钟消除2分钟负荷；超过16小时才累积睡眠债，超过18小时劳动更费力，超过24小时损害健康。">
+                    {fatigueLabel(s.clock.fatigueMinutes)}
+                  </span>
+                  <span>
+                    {relativeMoment(
+                      citySchedule(s.clock.minute).filter((item) =>
+                        /开门|开张|受理|打烊/.test(item.text),
+                      )[0].at,
+                      s.clock.minute,
+                    )}{' '}
+                    ·{' '}
+                    {
+                      citySchedule(s.clock.minute).filter((item) =>
+                        /开门|开张|受理|打烊/.test(item.text),
+                      )[0].text
+                    }
+                  </span>
+                  <button
+                    className="text-button"
+                    onClick={() => setTodayOpen(true)}
+                  >
+                    时辰表与今日要事
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={!!s.event || s.phase === 'ended'}
+                    onClick={() => navigate('street')}
+                  >
+                    此刻能做什么 · 招工告示
+                  </button>
+                </footer>
               </>
             )}
             <Dialog

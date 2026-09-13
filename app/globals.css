@@ -60,13 +60,7 @@
 .vital:last-child progress::-webkit-progress-value {
   background: #b99554;
 }
-.motion-setting {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 14px;
-  color: var(--muted);
-}
+
 .vital span {
   display: flex;
   align-items: center;
@@ -244,12 +238,6 @@
 }
 .night-inputs {
   gap: 12px;
-}
-:root:has(.reduce-motion) *,
-:root:has(.reduce-motion) *::before,
-:root:has(.reduce-motion) *::after {
-  animation: none !important;
-  transition: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
   *,

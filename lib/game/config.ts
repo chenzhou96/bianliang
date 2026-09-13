@@ -1,11 +1,60 @@
 import type {
   Buff,
+  Meal,
   EquipmentKind,
   Good,
   HousingId,
   Recipe,
   SkillId,
 } from './types.ts';
+
+/** Quantities use the same whole-item units shown in the inventory. */
+export const MEALS: Record<
+  Exclude<Meal, 'none'>,
+  {
+    name: string;
+    description: string;
+    ingredients: Partial<Record<Good, number>>;
+    cash: number;
+    health: number;
+  }
+> = {
+  grain: {
+    name: '粟米饭',
+    description: '粟米1份 · 健康+1',
+    ingredients: { grain: 1 },
+    cash: 0,
+    health: 1,
+  },
+  bread: {
+    name: '炊饼',
+    description: '炊饼1个 · 健康+1',
+    ingredients: { bread: 1 },
+    cash: 0,
+    health: 1,
+  },
+  egg: {
+    name: '鸡蛋配饭',
+    description: '粟米1份 + 鸡蛋1枚 · 健康+3',
+    ingredients: { grain: 1, egg: 1 },
+    cash: 0,
+    health: 3,
+  },
+  saltedEgg: {
+    name: '咸蛋配饭',
+    description: '粟米1份 + 咸蛋1枚 · 健康+2',
+    ingredients: { grain: 1, saltedEgg: 1 },
+    cash: 0,
+    health: 2,
+  },
+  diner: {
+    name: '食肆饭菜',
+    description: '60文 · 健康+4',
+    ingredients: {},
+    cash: 60,
+    health: 4,
+  },
+};
 
 export const RULES = {
   version: '4.0-time-experience',

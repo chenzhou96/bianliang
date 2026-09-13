@@ -81,9 +81,15 @@ try {
   assert.equal(await page.locator('.record-feed').innerText(), feedback);
   await noOverflow('saved-sale');
   assert.match(await page.locator('.record-feed').innerText(), /已售成本264文/);
-  await page.getByLabel('减少动态').check();
-  assert(await page.locator('main.reduce-motion').count());
-  await page.getByLabel('减少动态').uncheck();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(
+    await page
+      .locator('.masthead button')
+      .first()
+      .evaluate((el) => getComputedStyle(el).transitionDuration),
+    '0s',
+  );
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await load(newGame(20260911));
   await button('人物').click();
   await button('休息1小时').click();

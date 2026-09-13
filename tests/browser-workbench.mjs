@@ -41,10 +41,28 @@ try {
       (s) => localStorage.setItem('bianliang-save-v4', JSON.stringify(s)),
       newGame(42),
     );
+    await page.evaluate(() => {
+      localStorage.setItem('bianliang-save-v1', 'unused');
+      localStorage.setItem('bianliang-save-v3', 'unused');
+      localStorage.setItem('bianliang-save-v4-before-ux-revision-2', 'unused');
+    });
     await page.reload({ waitUntil: 'networkidle' });
     await page.getByRole('button', { name: /继续第/ }).click();
     for (const name of ['市场', '生产', '住宅', '资产', '人物', '订单']) {
       await nav(name);
+      if (width >= 1100) {
+        const tabs = await page
+          .locator('.workspaces > button')
+          .evaluateAll((elements) =>
+            elements.map((el) => el.getBoundingClientRect().toJSON()),
+          );
+        assert.equal(tabs.length, 9);
+        for (let index = 1; index < tabs.length; index++) {
+          assert(Math.abs(tabs[index].width - tabs[0].width) < 1);
+          assert(Math.abs(tabs[index].x - tabs[index - 1].right) < 1);
+        }
+      }
+
       const layout = await measureLayout(page);
       assert.deepEqual(
         layout.bad,
@@ -131,15 +149,11 @@ try {
           '.property-section',
         ])
           assert(await page.locator(cls).isVisible());
-      if (name === '住宅') {
-        const motion = page.getByRole('checkbox', { name: '减少动态' });
-        await motion.check();
-        assert(await motion.isChecked());
-        assert(await page.locator('main.reduce-motion').count());
-        await motion.focus();
-        await page.keyboard.press('Space');
-        assert.equal(await motion.isChecked(), false);
-      }
+      assert.deepEqual(
+        await page.locator('.toolbar button').allTextContents(),
+        ['导出备份', '重新开始'],
+      );
+      assert.equal(await page.locator('.toolbar input').count(), 0);
       if (name === '订单')
         for (const group of ['可接订单', '进行中', '近期记录', '熟客'])
           assert(

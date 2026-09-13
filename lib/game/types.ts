@@ -221,7 +221,13 @@ export interface Log {
   cash: number;
   items: string;
 }
+export interface DailyCash {
+  day: number;
+  income: number;
+  expense: number;
+}
 export interface Ledger {
+  dailyCash: DailyCash[];
   depositsPaid: number;
   depositsReturned: number;
   depositLosses: number;

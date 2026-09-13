@@ -23,7 +23,6 @@ async function load(s) {
   assert.deepEqual(readSave(JSON.stringify(s)), s);
   await page.evaluate((s) => {
     localStorage.clear();
-    localStorage.setItem('bianliang-save-v3', 'legacy-keep');
     localStorage.setItem('bianliang-save-v4', JSON.stringify(s));
   }, s);
   await page.reload({ waitUntil: 'networkidle' });
@@ -42,6 +41,16 @@ try {
     const s = dispatch(newGame(width), { type: 'wait', minutes: 720 }).state;
     await load(s);
     assert.equal(await page.getByText(/^鸡群 ·/).count(), 0);
+    assert.equal(
+      await page
+        .getByRole('button', { name: '等到08:00', exact: true })
+        .count(),
+      0,
+    );
+    assert.match(
+      await page.getByLabel('主餐', { exact: true }).innerText(),
+      /鸡蛋配饭/,
+    );
     await page.getByLabel('主餐', { exact: true }).selectOption('bread');
     const close = page.getByRole('button', { name: /^今日收工 ·/ });
     assert.doesNotMatch(
@@ -80,10 +89,6 @@ try {
     assert.equal(next.cash, s.cash - 30);
     assert.equal(next.operationHistory.length, s.operationHistory.length + 1);
     assert.equal(next.operationHistory.at(-1).action, 'closeDay');
-    assert.equal(
-      await page.evaluate(() => localStorage.getItem('bianliang-save-v3')),
-      'legacy-keep',
-    );
     await nav('市场');
     await nav('住宅');
     assert.equal(
@@ -140,6 +145,46 @@ try {
       .isDisabled(),
   );
   assert.deepEqual(errors, []);
+  for (const [width, height] of [
+    [1536, 864],
+    [1920, 1080],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width, height });
+    const emptyPantry = newGame(20260913);
+    emptyPantry.batches = emptyPantry.batches.filter((b) => b.good !== 'grain');
+    emptyPantry.stamina = 95;
+    await load(emptyPantry);
+    await page.getByLabel('主餐', { exact: true }).selectOption('grain');
+    await page.getByText('午休、自选睡眠与等待', { exact: true }).click();
+    assert(
+      await page
+        .getByRole('button', { name: '用主餐 · 30分钟', exact: true })
+        .isDisabled(),
+    );
+    const layout = await measureLayout(page);
+    assert.deepEqual(layout.bad, []);
+    if (width >= 700) {
+      for (const selector of [
+        '.life-choice select',
+        '.life-action-stack > .action:first-child .action-heading',
+        '.life-secondary-grid > section > .action:first-of-type .action-heading',
+      ]) {
+        const boxes = await page
+          .locator(selector)
+          .evaluateAll((elements) =>
+            elements.map((el) => el.getBoundingClientRect().toJSON()),
+          );
+        assert.equal(boxes.length, 2, selector);
+        assert(Math.abs(boxes[0].y - boxes[1].y) < 1, selector);
+        assert(Math.abs(boxes[0].width - boxes[1].width) < 1, selector);
+      }
+    }
+    await page.screenshot({
+      path: `${out}/${width}-expanded-alignment.png`,
+      fullPage: true,
+    });
+  }
   writeFileSync(
     `${out}/result.json`,
     JSON.stringify({ checks, riskCloseClicks: 2, errors }, null, 2),

@@ -191,8 +191,7 @@ export function closeDayPlan(
       : undefined;
   const mealMinutes = meal ? 30 : 0;
   const sleeping = Math.min(480, finishAt - s.clock.minute - mealMinutes);
-  if (sleeping < 60)
-    throw Error('距08:00已不足1小时睡眠，请等到08:00或自选睡眠');
+  if (sleeping < 60) throw Error('距08:00已不足1小时睡眠，请自选睡眠时长');
   const idle = finishAt - s.clock.minute - mealMinutes - sleeping;
   const segments: {
     kind: 'meal' | 'idle' | 'sleep';

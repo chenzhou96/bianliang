@@ -41,4 +41,4 @@ History mixes Chinese summaries and English `feat:` messages; no uniform prefix 
 
 ## Game Architecture & Persistence
 
-Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4`. Old v1/v2/v3 saves remain exportable but are not migrated or loaded; never overwrite their keys. Expose only player-known information through WebMCP.
+Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4`. This unpublished project supports only the current save format: do not add legacy migration, repair backups, or old-save export controls. Expose only player-known information through WebMCP.

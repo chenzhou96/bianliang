@@ -2,7 +2,7 @@ import { setDay } from './helpers.ts';
 import { measureLayout } from './layout-check.mjs';
 import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { newGame, dispatch, readSave } from '../lib/game/engine.ts';
 import { EVENTS, INFO_TEMPLATES } from '../lib/game/content.ts';
 import { EQUIPMENT_IDS, GOOD_IDS, GOODS, BUFFS } from '../lib/game/config.ts';
@@ -67,18 +67,43 @@ try {
   await button('开始新局').click();
   assert.equal((await read()).target, 30000);
   const downloadPromise = page.waitForEvent('download');
-  await button('导出存档').click();
-  assert(
-    (await downloadPromise).suggestedFilename().includes('bianliang-save-v4'),
+  await button('导出备份').click();
+  const backup = await downloadPromise;
+  assert(backup.suggestedFilename().includes('bianliang-save-v4'));
+  assert.deepEqual(
+    JSON.parse(readFileSync(await backup.path(), 'utf8')),
+    await read(),
   );
-  await page.locator('.footer-wait').evaluate((el) => (el.open = true));
+  assert.equal(
+    await page.evaluate(() =>
+      localStorage.getItem('bianliang-save-v4-before-ux-revision-2'),
+    ),
+    null,
+  );
   await page
-    .locator('.footer-wait')
+    .getByRole('navigation', { name: '经营工作区' })
+    .getByRole('button', { name: '住宅', exact: true })
+    .click();
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => {
+      el.parentElement.open = true;
+    });
+  await page
+    .locator('.life-secondary')
     .getByRole('button', { name: '等待30分钟', exact: true })
     .click();
-  await page.locator('.footer-wait').evaluate((el) => (el.open = true));
   await page
-    .locator('.footer-wait')
+    .getByRole('navigation', { name: '经营工作区' })
+    .getByRole('button', { name: '住宅', exact: true })
+    .click();
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => {
+      el.parentElement.open = true;
+    });
+  await page
+    .locator('.life-secondary')
     .getByRole('button', { name: '等待30分钟', exact: true })
     .click();
   await button('情报').click();

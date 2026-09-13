@@ -279,7 +279,7 @@ void test('maintenance and rent are paid with outside lodging and unpaid homes s
   let s = newGame(12);
   s.cash = 10000;
   s = act(s, { type: 'buyHousing', housing: 'yard' });
-  s.cash = 18;
+  s.cash = 60;
   s = closeDay(s, 'yard');
   assert.equal(s.cash, 0);
   assert(s.housing.maintenanceSuspended);
@@ -290,8 +290,8 @@ void test('maintenance and rent are paid with outside lodging and unpaid homes s
   s = act(newGame(13), { type: 'rentHousing', housing: 'room' });
   const before = s.cash;
   s = closeDay(s, 'inn');
-  assert.equal(before - s.cash, 60);
-  s.cash = 18;
+  assert.equal(before - s.cash, 102);
+  s.cash = 60;
   s = closeDay(s, 'room');
   assert.equal(s.cash, 0);
   assert.equal(s.housing.id, 'street');

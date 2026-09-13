@@ -2,7 +2,15 @@ import { citySchedule, fatigueLabel } from './time.ts';
 import { productionReadyAt } from './production-time.ts';
 import { statusActive } from './status.ts';
 import { publicOpportunities } from './market-opportunities.ts';
-import { BUFFS, GOODS, GOOD_IDS, HOUSING, SKILLS, RECIPES } from './config.ts';
+import {
+  MEALS,
+  BUFFS,
+  GOODS,
+  GOOD_IDS,
+  HOUSING,
+  SKILLS,
+  RECIPES,
+} from './config.ts';
 import {
   staminaMax,
   capacity,
@@ -42,6 +50,7 @@ export function publicState(s: GameState | null) {
     home: s.home,
     marketOpportunities: publicOpportunities(s),
     life: s.life,
+    meals: MEALS,
     target: s.target,
     phase: s.phase,
     cash: s.cash,
@@ -302,7 +311,8 @@ export function registerGameTools(
               id: { type: 'string' },
               eventId: { type: 'integer' },
               meal: {
-                enum: ['bread', 'egg', 'saltedEgg', 'grain', 'diner', 'none'],
+                enum: [...Object.keys(MEALS), 'none'],
+                description: '主餐配方见状态 meals；蛋类需搭配粟米，食肆60文。',
               },
               bed: {
                 enum: [

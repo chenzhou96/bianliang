@@ -2,6 +2,7 @@ import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { measureLayout } from './layout-check.mjs';
+import { newGame, dispatch } from '../lib/game/engine.ts';
 const out = 'tests/browser-output/street';
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -78,6 +79,20 @@ try {
     await page.locator('.street-body > .list-column').evaluate((el) => {
       el.scrollTop = 0;
     });
+    assert.equal(await page.locator('.street-body .city-schedule').count(), 0);
+    assert.equal(await page.locator('.bottom-bar, .footer-wait').count(), 0);
+    const clock = page.locator('footer.city-clock-note');
+    const clockBox = await clock.boundingBox();
+    if (width >= 1051) assert(clockBox.y > height - 55);
+    await page
+      .getByRole('button', { name: '时辰表与今日要事', exact: true })
+      .click();
+    assert.equal(
+      await page.getByRole('dialog').locator('.city-schedule').count(),
+      1,
+    );
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await check(`${width}x${height}-street`, width < 700);
     await button('短工 · 25文').click();
     assert.equal((await read()).cash, opening.cash + 25);
@@ -88,7 +103,7 @@ try {
     });
     assert.equal(await meal.getByRole('checkbox').count(), 0);
     const mealBox = await meal
-      .getByRole('button', { name: '用主餐 · 30分钟' })
+      .getByRole('button', { name: '用主餐 · 30分钟', exact: true })
       .boundingBox();
     if (width >= 700)
       assert.ok(
@@ -108,7 +123,37 @@ try {
     assert.match(await page.getByRole('dialog').innerText(), /今天18:00/);
     assert.match(await page.getByRole('dialog').innerText(), /明天06:00前/);
     await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
   }
+  await page.setViewportSize({ width: 1536, height: 864 });
+  const night = dispatch(newGame(42), { type: 'wait', minutes: 720 }).state;
+  night.cash = 3500;
+  await page.evaluate(
+    (s) => localStorage.setItem('bianliang-save-v4', JSON.stringify(s)),
+    night,
+  );
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /继续第/ }).click();
+  await nav('街巷');
+  const painting = page.locator('.street-scene img');
+  assert.match(await painting.getAttribute('src'), /night-market/);
+  await painting.evaluate((img) => img.decode());
+  await check('1536x864-night-street', false);
+  await button('时辰表与今日要事').click();
+  await page
+    .getByRole('dialog')
+    .screenshot({ path: `${out}/calendar-dialog.png` });
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  const homeward = page
+    .locator('.status')
+    .getByRole('button', { name: '支付3,000文归航', exact: true });
+  assert(await homeward.isVisible());
+  await homeward.click();
+  if (await page.getByRole('dialog').isVisible())
+    await button('确认执行').click();
+  assert.equal((await read()).ending, 'return');
+  checks.push('return-from-status');
   assert.deepEqual(errors, []);
   writeFileSync(
     `${out}/result.json`,

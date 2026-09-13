@@ -7,6 +7,7 @@ import {
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import {
+  suggestedMeal,
   assets,
   availableSurplus,
   dispatch,
@@ -184,6 +185,17 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
   };
   for (let day = 1; day <= days && s.phase !== 'ended'; day++) {
     const start = s.clock.minute;
+    // Buy staple food before investing in stock; a diner is now a premium meal.
+    if (suggestedMeal(s) === 'diner') {
+      const portions = Math.min(
+        s.cash > 150 ? 3 : 1,
+        Math.floor(s.cash / quote(s, 'grain').buy),
+      );
+      if (portions > 0)
+        act({ type: 'trade', good: 'grain', side: 'buy', quantity: portions });
+    }
+    if (s.life.ateCycle !== lifeCycle(s.clock.minute))
+      act({ type: 'eat', meal: suggestedMeal(s) });
     if (
       s.housing.id === 'street' &&
       s.cash >= (strategy === 'production' || strategy === 'mixed' ? 600 : 1600)
@@ -303,8 +315,7 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
     }
     if (s.health < 65 && s.cash > 160) act({ type: 'treat', mode: 'fast' });
     if (late && s.life.ateCycle !== lifeCycle(s.clock.minute)) {
-      if (quantity(s, 'bread') >= 1) act({ type: 'eat', meal: 'bread' });
-      else act({ type: 'eat', meal: 'diner' });
+      act({ type: 'eat', meal: suggestedMeal(s) });
     }
     if (strategy !== 'production' && strategy !== 'order') {
       const evening = Math.floor(start / 1440) * 1440 + 1080;
@@ -344,7 +355,7 @@ function run(seed: number, strategy: Strategy, days: number, late = false) {
       act({
         type: 'closeDay',
         bed: s.housing.id === 'street' ? 'temple' : s.housing.id,
-        meal: quantity(s, 'bread') >= 1 ? 'bread' : 'diner',
+        meal: suggestedMeal(s),
       });
     }
     const nextStart = Math.floor(start / 1440) * 1440 + 1920;
@@ -543,7 +554,7 @@ if (!isMainThread && workerData?.runner) {
       'tests/browser-output/economy/continuous.json',
     JSON.stringify(
       {
-        strategyVersion: 10,
+        strategyVersion: 11,
         samples,
         days,
         mode: gates.completeSample ? 'formal' : 'diagnostic',

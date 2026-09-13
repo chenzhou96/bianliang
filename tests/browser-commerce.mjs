@@ -177,7 +177,9 @@ try {
     await button('人物').click();
     // 经营成长 is available on the same workspace.
     await layout(`${w}x${h}-growth`);
-    await page.getByRole('button', { name: /^今日要事/ }).click();
+    await page
+      .getByRole('button', { name: '时辰表与今日要事', exact: true })
+      .click();
     await layout(`${w}x${h}-today`);
     await page.keyboard.press('Escape');
     const night = structuredClone(developed);
@@ -186,7 +188,9 @@ try {
       if (GOODS[b.good].life) b.remainingMinutes = 60;
     });
     await load(night);
-    await page.getByRole('button', { name: /^今日要事/ }).click();
+    await page
+      .getByRole('button', { name: '时辰表与今日要事', exact: true })
+      .click();
     assert.deepEqual(
       await page.locator('.today-task strong').allTextContents(),
       todayTasks(night).map((task) => task.title),
@@ -239,7 +243,9 @@ try {
       .locator('.record-feed')
       .evaluate((e) => (e.scrollTop = e.scrollHeight));
     await layout(w + 'x' + h + '-all-changes');
-    await page.getByRole('button', { name: /^今日要事/ }).focus();
+    await page
+      .getByRole('button', { name: '时辰表与今日要事', exact: true })
+      .focus();
     await page.keyboard.press('Enter');
     assert(await page.getByRole('dialog').isVisible());
     await page.keyboard.press('Escape');

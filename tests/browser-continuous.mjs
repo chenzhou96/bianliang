@@ -131,9 +131,17 @@ try {
     await page.locator('main').getAttribute('data-period'),
     'evening',
   );
-  await page.locator('.footer-wait').evaluate((el) => (el.open = true));
   await page
-    .locator('.footer-wait')
+    .getByRole('navigation', { name: '经营工作区' })
+    .getByRole('button', { name: '住宅', exact: true })
+    .click();
+  await page
+    .getByText('午休、自选睡眠与等待', { exact: true })
+    .evaluate((el) => {
+      el.parentElement.open = true;
+    });
+  await page
+    .locator('.life-secondary')
     .getByRole('button', { name: '等待30分钟', exact: true })
     .click();
   assert.equal(await page.locator('main').getAttribute('data-period'), 'late');
