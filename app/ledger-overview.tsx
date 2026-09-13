@@ -30,6 +30,7 @@ export function LedgerOverview({ s }: { s: GameState }) {
         ['住宅 / 设备投入', l.housing + l.equipment],
         ['饮食与住宿', l.living],
         ['学艺 / 交际', l.tuition + l.social],
+        ['行情奔走 / 罚款', s.marketControl.expenses + s.marketControl.fines],
         ['饲料 / 医疗', l.feed + l.medical],
         ['货物损耗 / 违约', l.losses + l.depositLosses],
       ],

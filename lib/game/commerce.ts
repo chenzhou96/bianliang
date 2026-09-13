@@ -10,8 +10,8 @@ export const CUSTOMER_IDS: CustomerId[] = [
   'ferryman',
 ];
 export const ORDER_RULES = {
-  normalMarkup: 1.25,
-  highRiskMarkup: 1.3,
+  normalMarkup: 1.1,
+  highRiskMarkup: 1.15,
   depositRate: 0.2,
   sizes: [1, 3, 8],
 } as const;

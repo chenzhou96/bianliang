@@ -29,6 +29,8 @@ export function actionTitle(action: Action): string {
   if (action.type === 'trade')
     return `${action.side === 'buy' ? '购入' : '售出'}${GOODS[action.good]?.name ?? '货物'} ×${action.quantity}`;
   const names: Partial<Record<Action['type'], string>> = {
+    influenceMarket: '行情奔走',
+    serveSentence: '拘押期满',
     market: '进入市场',
     buyLot: '整批采购完成',
     supplyRequest: '限量收购交货',

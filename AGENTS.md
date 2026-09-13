@@ -8,6 +8,7 @@
 - **宋风纸本与淡彩**：保持清晰、轻快、低饱和的视觉；美术服务于辨识与阅读。商品轮廓应容易区分，不能出现炊饼像鸡蛋的情况。按钮、菜单、选择器和说明入口保持统一风格。
 - **信息只留一个主要入口**：时辰表与今日要事保留弹窗，流水明细留在完整记录。腾出的空间用于场景美术或能帮助决策的汇总，不用另一份文字列表填满。
 - **经营概览解释经营结果**：每日现金收支与已售商品毛利分开；采购、资产投入、库存耗用、保证金及回收不得混为盈亏。图表基于实际结算记录，不从截断日志推算或编造历史。
+- **统一牌价与行情干预**：普通市场买卖同价，保留运输、时间和腐坏成本；合法/违法行情手段共用冷却且可能反向。罚款、奔走费与已售商品毛利分开；拘押必须推进真实时间，接口预览不泄露随机结果。
 - **连续时间与明确取舍**：白天、夜晚保持同一经营界面，不另设夜间页面。删除被其他选择完全替代的操作，例如“等到08:00”；保留有明确用途的等待、休息和睡眠。
 - **生活与价格有合理层次**：主餐应体现食材搭配、库存成本、价格和健康收益的区别；蛋类不能简单等同一份主食，外食便利应有代价。具体数值以共享配置为准，不在界面另写一套规则。
 - **整齐而紧凑的工作区**：导航连续、等宽，当前页标识明确；输入与所属操作归组，主要按钮和说明按固定网格对齐。桌面资产与记录常驻，长内容在区域内滚动；手机按阅读顺序排列。
@@ -58,4 +59,4 @@ History mixes Chinese summaries and English `feat:` messages; no uniform prefix 
 
 ## Game Architecture & Persistence
 
-Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4` with `saveRevision: 5` for branching stories. This unpublished project supports only the current save format: do not add legacy migration, repair backups, or old-save export controls. Expose only player-known information through WebMCP.
+Keep rules in the shared engine and update state types, UI, persistence, and WebMCP together. The continuous-time version uses `bianliang-save-v4` with `saveRevision: 6` for unified prices and market interventions. This unpublished project supports only the current save format: do not add legacy migration, repair backups, or old-save export controls. Expose only player-known information through WebMCP.

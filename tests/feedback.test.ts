@@ -43,7 +43,7 @@ void test('navigation preserves results and sale feedback reconciles inventory a
     quantity: 1,
     side: 'sell',
   });
-  assert.deepEqual(sale.result?.sale, { revenue: 97, cost: 113, profit: -16 });
+  assert.deepEqual(sale.result?.sale, { revenue: 113, cost: 113, profit: 0 });
   s = dispatch(sale.state, { type: 'leave' }).state;
   assert.deepEqual(s.operationHistory, sale.state.operationHistory);
   assert.equal(s.lastResponse, sale.state.lastResponse);

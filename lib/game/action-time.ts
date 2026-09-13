@@ -1,3 +1,4 @@
+import { marketMethod } from './market-control.ts';
 import { lotWeight } from './market-opportunities.ts';
 import { hasFacility } from './home.ts';
 import type { Action, GameState } from './types.ts';
@@ -19,6 +20,15 @@ export function actionTiming(
 ): { minutes: number; venue: Venue } {
   const a = action;
   switch (a.type) {
+    case 'influenceMarket':
+      return { minutes: marketMethod(a.method).minutes, venue: 'market' };
+    case 'serveSentence':
+      if (s.marketControl.jailedUntil <= s.clock.minute)
+        throw Error('当前没有拘押');
+      return {
+        minutes: s.marketControl.jailedUntil - s.clock.minute,
+        venue: 'home',
+      };
     case 'storyRead':
     case 'storyAbandon':
       return { minutes: 0, venue: 'home' };
@@ -30,8 +40,10 @@ export function actionTiming(
       );
       return {
         minutes:
-          c.minutes + (weight ? transportQuote(weight, 'self').minutes : 0),
-        venue: weight ? 'customer' : 'home',
+          c.minutes +
+          (c.influence ? marketMethod(c.influence.method).minutes : 0) +
+          (weight ? transportQuote(weight, 'self').minutes : 0),
+        venue: c.influence ? 'market' : weight ? 'customer' : 'home',
       };
     }
     case 'storyBuy': {

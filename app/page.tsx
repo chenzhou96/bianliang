@@ -1,5 +1,6 @@
 'use client';
 import Image from 'next/image';
+import { MARKET_METHODS, type MarketMethod } from '@/lib/game/market-control';
 import { knownIntel } from '@/lib/game/intelligence';
 import { knownStory } from '@/lib/game/story-engine';
 import { SCENE_MAP } from '@/lib/game/street-scenes';
@@ -182,7 +183,7 @@ function Do({
             <span>
               现金变化：
               {p.cashChange === null
-                ? '不确定（存在失窃风险）'
+                ? '不确定（见下方风险说明）'
                 : money(p.cashChange)}
             </span>
           )}
@@ -210,7 +211,7 @@ function Do({
             {num(s.stamina + (p.staminaChange ?? 0))} · 健康变化
             {num(p.healthChange ?? 0)} · 现金变化
             {p.cashChange === null
-              ? '不确定（存在失窃风险）'
+              ? '不确定（见下方风险说明）'
               : money(p.cashChange)}
           </small>
         )}
@@ -437,10 +438,7 @@ function MarketOpportunitiesView({ s, act }: Props) {
   );
 }
 function PriceChart({ s, good }: { s: GameState; good: Good }) {
-  const values = s.history.flatMap((h) => [
-    h.prices[good].buy,
-    h.prices[good].sell,
-  ]);
+  const values = s.history.map((h) => h.prices[good].buy);
   const low = Math.min(...values);
   const high = Math.max(...values);
   const points = (side: 'buy' | 'sell') =>
@@ -454,7 +452,7 @@ function PriceChart({ s, good }: { s: GameState; good: Good }) {
     <figure>
       <svg
         viewBox="0 0 300 105"
-        aria-label={`${GOODS[good].name}最近14日买卖价格`}
+        aria-label={`${GOODS[good].name}最近14日统一牌价`}
         style={{ width: '100%', maxHeight: 140 }}
       >
         <polyline
@@ -463,19 +461,13 @@ function PriceChart({ s, good }: { s: GameState; good: Good }) {
           stroke="#ae572d"
           strokeWidth="2"
         />
-        <polyline
-          points={points('sell')}
-          fill="none"
-          stroke="#39736a"
-          strokeWidth="2"
-        />
       </svg>
       <figcaption>
-        买价（棕） / 卖价（绿） · {low}—{high}文
+        统一牌价 · {low}—{high}文（每日最新实价）
         <InfoHint label={`${GOODS[good].name}逐日价格`}>
           {s.history.map((h) => (
             <span key={h.day}>
-              第{h.day}日：买{h.prices[good].buy} / 卖{h.prices[good].sell}文
+              第{h.day}日：{h.prices[good].buy}文
             </span>
           ))}
         </InfoHint>
@@ -530,7 +522,7 @@ function Market({ s, act }: Props) {
       className="market-panel"
       scene={marketScene}
       title="州桥市"
-      note="看行情免费，选一件货，再决定买卖。"
+      note="买卖同价，盈亏取决于行情、搬运与库存成本。"
     >
       <div className="toolbar">
         <label>
@@ -568,7 +560,7 @@ function Market({ s, act }: Props) {
           <div className="list-column">
             <div className="list-label">
               <span>货物 / 持有</span>
-              <span>买 / 卖 · 较昨日</span>
+              <span>牌价 · 较昨日</span>
             </div>
             <div className="item-list">
               {list.length === 0 && <p>没有匹配商品，可切换筛选查看。</p>}
@@ -594,7 +586,7 @@ function Market({ s, act }: Props) {
                       </small>
                     </span>
                     <span>
-                      {price.buy} / {price.sell}文
+                      {price.buy}文
                       <small className={change > 0 ? 'rise' : 'fall'}>
                         {change > 0 ? '+' : ''}
                         {change}%
@@ -612,10 +604,8 @@ function Market({ s, act }: Props) {
                 <h2>{g.name}</h2>
                 <dl className="facts trade-facts">
                   <div>
-                    <dt>买 / 卖</dt>
-                    <dd>
-                      {p.buy} / {p.sell}文
-                    </dd>
+                    <dt>统一牌价</dt>
+                    <dd>{p.buy}文</dd>
                   </div>
 
                   <div>
@@ -676,7 +666,7 @@ function Market({ s, act }: Props) {
                   </>
                 )}
                 <InfoHint label="成本与利润说明">
-                  持仓浮盈按当前卖价估值，尚未实现；出库成本按本次数量计算，保本价和净利含搬运费，不含生活与住房费用。
+                  持仓浮盈按当前牌价估值，尚未实现；出库成本按本次数量计算，保本价和净利含搬运费，不含生活与住房费用。
                 </InfoHint>
               </div>
               <div className="trade-inputs">
@@ -750,10 +740,10 @@ function Market({ s, act }: Props) {
               </div>
               <div className="trade-totals">
                 <span>
-                  买入 {money(Number.isFinite(q) ? Math.ceil(p.buy * q) : 0)}
-                </span>
-                <span>
-                  卖出 {money(Number.isFinite(q) ? Math.floor(p.sell * q) : 0)}
+                  货款 {money(Number.isFinite(q) ? Math.ceil(p.buy * q) : 0)}
+                  {Number.isFinite(q) &&
+                    Math.ceil(p.buy * q) !== Math.floor(p.sell * q) &&
+                    `（卖出取整${money(Math.floor(p.sell * q))}）`}
                 </span>
                 <span>
                   运费 {money(Number.isFinite(q) && q > 0 ? freight : 0)}
@@ -788,6 +778,30 @@ function Market({ s, act }: Props) {
                 </Do>
               </div>
             </div>
+            <details className="market-influence">
+              <summary>主动影响{g.name}行情</summary>
+              <p>
+                影响持续至下次06:00议价，所有手段共用48小时冷却。费用不会因落空退回；涨跌受正常价格上下限约束。
+              </p>
+              {s.clock.minute < s.marketControl.nextAt && (
+                <p>
+                  下次可奔走：
+                  {relativeMoment(s.marketControl.nextAt, s.clock.minute)}
+                </p>
+              )}
+              {(Object.keys(MARKET_METHODS) as MarketMethod[]).map((method) => (
+                <div key={method}>
+                  <Do
+                    s={s}
+                    act={act}
+                    action={{ type: 'influenceMarket', method, good: selected }}
+                  >
+                    {MARKET_METHODS[method].name}
+                  </Do>
+                </div>
+              ))}
+              {s.marketControl.last && <p>{s.marketControl.last}</p>}
+            </details>
             <section className="price-history" aria-label="价格记录">
               <h3>价格记录</h3>
               <PriceChart s={s} good={selected} />
@@ -2023,7 +2037,7 @@ function Assets({ s }: Props) {
                   </dd>
                 </div>
                 <div>
-                  <dt>参考卖价 / 预计盈亏</dt>
+                  <dt>参考牌价 / 预计盈亏</dt>
                   <dd>
                     {money(quote(s, good).sell)} /{' '}
                     {money(chosen!.value - inventoryCost(s, good))}
@@ -2079,7 +2093,7 @@ function Assets({ s }: Props) {
             </p>
           )}
           <small>
-            货物按当前市场卖价估值；在制品单独列投入成本，不计入可变现合计。设备和产权实际出售仍须满足操作条件。
+            货物按当前市场牌价估值；在制品单独列投入成本，不计入可变现合计。设备和产权实际出售仍须满足操作条件。
           </small>
           <p>
             参考可变现合计：
@@ -2926,8 +2940,33 @@ export default function Home() {
                       value={reserved(s)}
                     />
                   </div>
-                  <StatusEffects s={s} />
-                  {!s.event && s.phase !== 'ended' && s.cash >= s.target ? (
+                  {s.marketControl.jailedUntil > s.clock.minute ? (
+                    <div aria-label="拘押">
+                      <span>
+                        拘押至
+                        {relativeMoment(
+                          s.marketControl.jailedUntil,
+                          s.clock.minute,
+                        )}
+                      </span>
+                      <InfoHint label="拘押期间的结算">
+                        <span>
+                          暂不能经营；服满需
+                          {formatDuration(
+                            s.marketControl.jailedUntil - s.clock.minute,
+                          )}
+                          ，订单、库存、房费和疲劳照常结算。
+                        </span>
+                      </InfoHint>
+                    </div>
+                  ) : (
+                    <StatusEffects s={s} />
+                  )}
+                  {s.marketControl.jailedUntil > s.clock.minute ? (
+                    <Btn onClick={() => act({ type: 'serveSentence' })}>
+                      服满拘押
+                    </Btn>
+                  ) : !s.event && s.phase !== 'ended' && s.cash >= s.target ? (
                     <Btn onClick={() => act({ type: 'return' })}>
                       支付{money(s.target)}归航
                     </Btn>

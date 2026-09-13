@@ -151,12 +151,8 @@ export function generateOpportunities(s: GameState) {
       (n, [g, q]) => n + s.prices[g as Good].buy * q!,
       0,
     );
-    const resale = Object.entries(goods).reduce(
-      (n, [g, q]) => n + s.prices[g as Good].sell * q!,
-      0,
-    );
     const discount = (5 + (pick(s.seed, cycle, i + 40) % 11)) / 100;
-    const price = Math.max(resale + 1, Math.ceil(retail * (1 - discount)));
+    const price = Math.ceil(retail * (1 - discount));
     if (price > Math.floor(retail * 0.95) || (night && price > 240)) continue;
     s.marketOffers.lots.push({
       id: `lot:${cycle}:${i}`,

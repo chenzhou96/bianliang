@@ -44,8 +44,8 @@ function supplies(s: GameState, goods: Partial<Record<Good, number>> = {}) {
     });
 }
 
-await test('six authored story graphs and sixteen scenes have reachable endings and free exits', () => {
-  assert.equal(STORIES.length, 6);
+await test('seven authored story graphs and sixteen scenes have reachable endings and free exits', () => {
+  assert.equal(STORIES.length, 7);
   assert.equal(STREET_SCENES.length, 16);
   assert.equal(STREET_SCENES.filter((s) => s.storyId).length, 6);
   for (const scene of STREET_SCENES) {
@@ -67,7 +67,10 @@ await test('six authored story graphs and sixteen scenes have reachable endings 
         assert.ok(stage.timeout);
         walk(stage.timeout!);
       }
-      for (const c of stage.choices) walk(c.next);
+      for (const c of stage.choices) {
+        walk(c.next);
+        if (c.influence?.caughtNext) walk(c.influence.caughtNext);
+      }
       assert.ok(stage.ending || stage.choices.length);
     };
     walk(d.opening);
@@ -314,7 +317,7 @@ await test('story public view does not disclose unvisited stages, true branch or
 await test('format revision and story validation reject missing, duplicate or impossible progress', () => {
   const s = rich();
   discoverStory(s, 'granary', 'tea');
-  assert.equal(s.saveRevision, 5);
+  assert.equal(s.saveRevision, 6);
   assert.ok(validStories(s));
   for (const mutate of [
     (v: GameState) => {

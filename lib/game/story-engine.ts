@@ -1,3 +1,4 @@
+import { marketMethod } from './market-control.ts';
 import { GOODS, GOOD_IDS } from './config.ts';
 import { STORIES, STORY_MAP, storyStage } from './stories.ts';
 import { formatMoment } from './time.ts';
@@ -147,7 +148,10 @@ export function recordStoryChoice(
 }
 export function storyCostText(c: StoryChoice) {
   return [
-    `${c.minutes}分钟`,
+    `${c.minutes + (c.influence ? marketMethod(c.influence.method).minutes : 0)}分钟`,
+    c.influence
+      ? `${marketMethod(c.influence.method).cash}文 · ${marketMethod(c.influence.method).stamina}体力`
+      : '',
     c.cost?.cash ? `${c.cost.cash}文` : '',
     c.cost?.stamina ? `${c.cost.stamina}体力` : '',
     ...Object.entries(c.cost?.goods ?? {}).map(
@@ -205,7 +209,9 @@ export function knownStory(s: GameState, q: StoryInstance) {
         : stage.choices.map((c) => ({
             id: c.id,
             label: c.label,
-            minutes: c.minutes,
+            minutes:
+              c.minutes +
+              (c.influence ? marketMethod(c.influence.method).minutes : 0),
             cost: c.cost,
             destination: c.destination ?? 'intel',
             costText: storyCostText(c),

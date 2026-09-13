@@ -54,3 +54,6 @@ next-env.d.ts
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# reproducible standalone distribution archives
+/releases/

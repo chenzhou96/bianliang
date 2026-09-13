@@ -27,7 +27,7 @@ function night(s: GameState) {
 
 void test('v4 content and rules expose the planned long-game surface', () => {
   assert.equal(GOOD_IDS.length, 17);
-  assert.equal(STORIES.length, 6);
+  assert.equal(STORIES.length, 7);
   assert.equal(STREET_SCENES.length, 16);
   assert.equal(RECIPES.length, 7);
   assert.deepEqual(SKILL_IDS, ['husbandry', 'food', 'textile', 'brewing']);
@@ -193,10 +193,10 @@ void test('reselling purchased goods counts cost once and keeps production separ
   let s = act(newGame(42), { type: 'market' });
   s = act(s, { type: 'trade', side: 'buy', good: 'herb', quantity: 1 });
   s = act(s, { type: 'trade', side: 'sell', good: 'herb', quantity: 1 });
-  assert.equal(s.cash, 784);
+  assert.equal(s.cash, 800);
   assert.equal(s.ledger.purchases, 113);
   assert.equal(s.ledger.tradeCost, 113);
-  assert.equal(s.ledger.tradeRevenue - s.ledger.tradeCost, -16);
+  assert.equal(s.ledger.tradeRevenue - s.ledger.tradeCost, 0);
   s.batches.push({
     id: s.nextId++,
     good: 'herb',
@@ -206,8 +206,8 @@ void test('reselling purchased goods counts cost once and keeps production separ
     remainingMinutes: null,
   });
   s = act(s, { type: 'trade', side: 'sell', good: 'herb', quantity: 1 });
-  assert.equal(s.ledger.tradeRevenue, 97);
-  assert.equal(s.ledger.productionRevenue, 97);
+  assert.equal(s.ledger.tradeRevenue, 113);
+  assert.equal(s.ledger.productionRevenue, 113);
   assert.equal(s.ledger.productionCost, 25);
 });
 void test('fractional trades charge accumulated carrying, not per-order rounding', () => {
@@ -333,7 +333,7 @@ void test('100 days of tea offer unique stories and real market rumors, empty vi
     }
     s = closeDay(s, 'mansion');
   }
-  assert.equal(s.stories.length, 6);
+  assert.equal(s.stories.length, 7);
   assert.ok(rumors > 10);
   assert.ok(empty > 10);
   assert(s.worlds.some((w) => w.expected > 120));
@@ -378,7 +378,7 @@ void test('every recipe completes purchase-learn-install-produce-sell with reloa
     // Use ordinary reference prices to compare production margin without a random price event.
     s.prices[recipe.output] = {
       buy: GOODS[recipe.output].base,
-      sell: GOODS[recipe.output].firstSell,
+      sell: GOODS[recipe.output].base,
     };
     s = act(s, { type: 'market' });
     s = act(s, {

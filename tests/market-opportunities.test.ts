@@ -33,7 +33,7 @@ await test('每日货源确定、限量且读档和浏览不刷新，未开夜�
   assert.deepEqual(newGame(5).marketOffers, s.marketOffers);
 });
 
-await test('货盘生成遵守折扣、夜市总价和公开即刻转售边界', () => {
+await test('货盘生成遵守折扣、夜市总价和限量批发收益边界', () => {
   for (let seed = 0; seed < 60; seed++) {
     const s = newGame(seed);
     for (const lot of s.marketOffers.lots) {
@@ -46,7 +46,7 @@ await test('货盘生成遵守折扣、夜市总价和公开即刻转售边界',
         0,
       );
       assert.ok(lot.price >= retail * 0.85 && lot.price <= retail * 0.95);
-      assert.ok(lot.price > resale);
+      assert.ok(lot.price < resale);
       if (lot.opensAt === 1080) assert.ok(lot.price <= 240);
       assert.ok(
         Object.keys(lot.goods).every(

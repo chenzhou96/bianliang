@@ -106,6 +106,16 @@ export function run(
   };
   const act = (action: Action) => {
     if (s.phase === 'ended') return false;
+    if (
+      s.marketControl.jailedUntil > s.clock.minute &&
+      action.type !== 'serveSentence'
+    ) {
+      const served = dispatch(s, { type: 'serveSentence' });
+      assert.equal(served.error, undefined);
+      observe(s, served.state, { type: 'serveSentence' });
+      s = served.state;
+      if (s.phase === 'ended') return false;
+    }
     if (s.event && action.type !== 'choice') {
       const sceneChoice =
         storyPolicy === 'none'
@@ -627,7 +637,7 @@ if (!isMainThread && workerData?.runner) {
       'tests/browser-output/economy/continuous.json',
     JSON.stringify(
       {
-        strategyVersion: 11,
+        strategyVersion: 12,
         samples,
         days,
         mode: gates.completeSample ? 'formal' : 'diagnostic',

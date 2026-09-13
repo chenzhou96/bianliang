@@ -79,7 +79,6 @@ export const GOODS: Record<
   {
     name: string;
     base: number;
-    firstSell: number;
     unit: string;
     life?: number;
     category: string;
@@ -88,58 +87,50 @@ export const GOODS: Record<
   grain: {
     name: '粟米',
     base: 21,
-    firstSell: 18,
     unit: '份',
     category: '粮食',
   },
   wheat: {
     name: '小麦',
     base: 26,
-    firstSell: 22,
     unit: '份',
     category: '粮食',
   },
   flour: {
     name: '面粉',
     base: 44,
-    firstSell: 37,
     unit: '份',
     category: '食品',
   },
-  salt: { name: '盐', base: 18, firstSell: 15, unit: '份', category: '食品' },
+  salt: { name: '盐', base: 18, unit: '份', category: '食品' },
   firewood: {
     name: '柴薪',
     base: 12,
-    firstSell: 10,
     unit: '捆',
     category: '燃料',
   },
-  hemp: { name: '原麻', base: 31, firstSell: 26, unit: '份', category: '纺织' },
+  hemp: { name: '原麻', base: 31, unit: '份', category: '纺织' },
   thread: {
     name: '麻线',
     base: 66,
-    firstSell: 56,
     unit: '份',
     category: '纺织',
   },
   silkRaw: {
     name: '生丝',
     base: 168,
-    firstSell: 143,
     unit: '份',
     category: '纺织',
   },
   silk: {
     name: '丝绸',
     base: 330,
-    firstSell: 281,
     unit: '匹',
     category: '纺织',
   },
   bread: {
     name: '炊饼',
     base: 30,
-    firstSell: 25,
     unit: '个',
     life: 3,
     category: '食品',
@@ -147,14 +138,12 @@ export const GOODS: Record<
   hen: {
     name: '母鸡',
     base: 126,
-    firstSell: 108,
     unit: '只',
     category: '养殖',
   },
   egg: {
     name: '鸡蛋',
     base: 15,
-    firstSell: 12,
     unit: '枚',
     life: 5,
     category: '食品',
@@ -162,7 +151,6 @@ export const GOODS: Record<
   saltedEgg: {
     name: '咸蛋',
     base: 29,
-    firstSell: 25,
     unit: '枚',
     life: 10,
     category: '食品',
@@ -170,22 +158,19 @@ export const GOODS: Record<
   cloth: {
     name: '麻布',
     base: 112,
-    firstSell: 95,
     unit: '匹',
     category: '纺织',
   },
   tea: {
     name: '茶叶',
     base: 174,
-    firstSell: 149,
     unit: '份',
     category: '贸易',
   },
-  wine: { name: '酒', base: 128, firstSell: 109, unit: '坛', category: '酿造' },
+  wine: { name: '酒', base: 128, unit: '坛', category: '酿造' },
   herb: {
     name: '药材',
     base: 113,
-    firstSell: 97,
     unit: '包',
     category: '药材',
   },
@@ -194,7 +179,7 @@ export const GOOD_IDS = Object.keys(GOODS) as Good[];
 
 export const BUFFS: Record<Buff, { name: string; detail: string }> = {
   outsider: { name: '异乡人', detail: '初到汴梁，听到消息后记得追问出处' },
-  regular: { name: '粮商熟客', detail: '购买粟米九五折，仍保留买卖差价' },
+  regular: { name: '粮商熟客', detail: '合法影响粟米行情的奔走费减5文' },
   tired: { name: '劳累', detail: '劳动和生产体力成本 +5' },
   cold: { name: '风寒', detail: '每24小时健康 −2，按实际时间累计；持续48小时' },
   warm: { name: '热饭余温', detail: '接下来8小时内，睡眠每8小时额外恢复5体力' },

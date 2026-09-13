@@ -24,6 +24,11 @@ export interface StoryReward {
   opportunity?: { good: Good; quantity: number; price: number; days: number };
 }
 export interface StoryChoice {
+  influence?: {
+    method: import('./market-control.ts').MarketMethod;
+    good: Good;
+    caughtNext?: string;
+  };
   id: string;
   label: string;
   text: string;

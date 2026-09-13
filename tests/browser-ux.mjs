@@ -63,7 +63,10 @@ try {
   await click('最大卖出');
   await click('卖出');
   const end = await read();
-  assert.equal(end.cash, 3111);
+  assert.equal(
+    end.cash,
+    s.cash - 6 * s.prices.flour.buy + 15 * s.prices.bread.sell,
+  );
   assert.equal(end.operationHistory.length, 3);
   assert(
     clicks + inputs <= 10,

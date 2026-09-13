@@ -1,3 +1,11 @@
+import {
+  marketMethod,
+  newMarketControl,
+  checkInfluence,
+  settleInfluence,
+  influenceCost,
+  validMarketControl,
+} from './market-control.ts';
 import { knownIntel } from './intelligence.ts';
 import { recordCash, validCashHistory } from './ledger.ts';
 import { productionEarliest } from './production-time.ts';
@@ -150,14 +158,7 @@ export function installed(s: GameState, kind: EquipmentKind) {
   return s.equipment.find((e) => e.kind === kind && e.installed);
 }
 export function quote(s: GameState, g: Good) {
-  const p = s.prices[g];
-  return {
-    buy:
-      g === 'grain' && active(s, 'regular')
-        ? Math.max(p.sell + 1, Math.round(p.buy * 0.95))
-        : p.buy,
-    sell: p.sell,
-  };
+  return { ...s.prices[g] };
 }
 export function assets(s: GameState) {
   return (
@@ -317,7 +318,7 @@ export function updatePrices(s: GameState) {
     );
     s.prices[g] = {
       buy,
-      sell: Math.max(1, Math.min(buy - 1, Math.floor(buy * 0.85))),
+      sell: buy,
     };
   }
   s.history.push({ day: s.day, prices: structuredClone(s.prices) });
@@ -371,7 +372,8 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
       lastDawn: 360,
       wakeSummary: null,
     },
-    saveRevision: 5,
+    saveRevision: 6,
+    marketControl: newMarketControl(),
     operationHistory: [],
     version: 4,
     rules: RULES.version,
@@ -445,7 +447,7 @@ export function newGame(seed: number, target: 3000 | 30000 = 3000): GameState {
     },
   };
   for (const g of GOOD_IDS) {
-    s.prices[g] = { buy: GOODS[g].base, sell: GOODS[g].firstSell };
+    s.prices[g] = { buy: GOODS[g].base, sell: GOODS[g].base };
     s.trend[g] = 1;
   }
   add(s, 'bread', 20);
@@ -753,6 +755,7 @@ export function actionEnergy(s: GameState, a: Action) {
   }
 }
 function rawActionEnergy(s: GameState, a: Action) {
+  if (a.type === 'influenceMarket') return marketMethod(a.method).stamina;
   if (a.type === 'storyAction') {
     const { c } = storyChoice(s, a.storyId, a.stage, a.choiceId);
     const weight = Object.values(c.cost?.goods ?? {}).reduce(
@@ -761,6 +764,7 @@ function rawActionEnergy(s: GameState, a: Action) {
     );
     return (
       (c.cost?.stamina ?? 0) +
+      (c.influence ? marketMethod(c.influence.method).stamina : 0) +
       (weight ? transportQuote(weight, 'self').stamina : 0)
     );
   }
@@ -858,7 +862,20 @@ export function actionPreview(s: GameState, a: Action) {
   );
   const finishAt = s.clock.minute + duration;
   const crossesDawn = nextDailyTime(s.clock.minute, 360) <= finishAt;
-  const uncertainOutcome = a.type === 'choice' && !s.event?.sceneId;
+  const story =
+    a.type === 'storyAction'
+      ? s.stories.find((q) => q.id === a.storyId)
+      : undefined;
+  const influence =
+    a.type === 'influenceMarket'
+      ? a
+      : a.type === 'storyAction' && story
+        ? STORY_MAP[story.definitionId]?.stages
+            .find((stage) => stage.id === a.stage)
+            ?.choices.find((c) => c.id === a.choiceId)?.influence
+        : undefined;
+  const uncertainOutcome =
+    (a.type === 'choice' && !s.event?.sceneId) || !!influence;
   const theftRisk =
     (a.type === 'sleep' || a.type === 'closeDay') &&
     (a.bed === 'street' ||
@@ -935,7 +952,10 @@ export function actionPreview(s: GameState, a: Action) {
     healthChange: uncertainOutcome ? null : result.state.health - s.health,
     staminaChange: uncertainOutcome ? null : result.state.stamina - s.stamina,
     cashChange:
-      uncertainOutcome || theftRisk ? null : result.state.cash - s.cash,
+      (uncertainOutcome && (!influence || influence.method === 'rumor')) ||
+      theftRisk
+        ? null
+        : result.state.cash - s.cash,
     energy,
     segments,
     earlierTarget,
@@ -949,6 +969,7 @@ export function actionPreview(s: GameState, a: Action) {
           missedMeal ||
           housingRisk)),
     warning: [
+      influence ? marketMethod(influence.method).detail : '',
       missedMeal ? '本次安排会错过主餐检查，健康将受损；请先安排饭食。' : '',
       housingRisk ? '本次安排期间住房将退租或停止维护，请先准备房费。' : '',
       a.type === 'closeDay' &&
@@ -974,7 +995,7 @@ export function actionPreview(s: GameState, a: Action) {
           `期间故事「${STORY_MAP[q.definitionId].title}」于${formatMoment(q.deadlineAt!)}截止，未完成将进入事后处理。`,
       ),
       ...spoilage.map((l) => `${l.text}${l.items ?? ''}`),
-      uncertainOutcome
+      uncertainOutcome && !influence
         ? '回应结果尚未确定；按已知线索判断，不预先显示随机报酬。'
         : '',
       theftRisk
@@ -1225,6 +1246,26 @@ export function operationResponse(
       : (after.logs.filter((l) => l.id >= before.nextId).at(-1)?.text ??
         '操作已完成。');
   return `${names[action.type] ?? '操作完成'}${changes.length ? ' · ' + changes.join('，') : ''}。${detail}`;
+}
+
+function performInfluence(
+  s: GameState,
+  method: import('./market-control.ts').MarketMethod,
+  good: Good,
+  recordOutcome = true,
+) {
+  checkInfluence(s, method, good);
+  const fee = influenceCost(s, method, good);
+  money(s, -fee, marketMethod(method).name);
+  s.marketControl.expenses += fee;
+  s.stamina -= marketMethod(method).stamina;
+  const outcome = settleInfluence(s, method, good, random(s), random(s));
+  if (outcome.fine) {
+    money(s, -outcome.fine, '虚构行情罚款');
+    s.marketControl.fines += outcome.fine;
+  }
+  s.story = outcome.text;
+  if (recordOutcome) log(s, outcome.text);
 }
 
 function performTrade(
@@ -1708,6 +1749,11 @@ function dispatchInternal(
     if (expectedRevision !== state.revision)
       throw Error('操作已更新，请勿重复提交');
     if (state.phase === 'ended') throw Error('本局已经结束');
+    if (
+      state.clock.minute < state.marketControl.jailedUntil &&
+      !['serveSentence', 'market', 'leave', 'storyRead'].includes(action.type)
+    )
+      throw Error('拘押期间无法外出经营，请先服满拘押');
     if (state.event && !['inspect', 'choice'].includes(action.type))
       throw Error('请先回应眼前的意外');
     if (action.type === 'closeDay' || action.type === 'waitUntil') {
@@ -1896,7 +1942,7 @@ function dispatchInternal(
     );
     if (applied.error) throw Error(applied.error);
     const next = applied.state;
-    next.prices = actualPrices;
+    if (action.type === 'trade') next.prices = actualPrices;
     next.stamina = Math.max(0, next.stamina - extraEnergy);
     next.life.fed = next.life.fed.filter((id) =>
       next.hens.some((h) => h.id === id),
@@ -2006,6 +2052,15 @@ function applyAction(
   const s = structuredClone(state);
   try {
     switch (action.type) {
+      case 'influenceMarket':
+        performInfluence(s, action.method, action.good);
+        break;
+      case 'serveSentence':
+        if (!s.marketControl.jailedUntil) throw Error('当前没有拘押');
+        s.marketControl.jailedUntil = 0;
+        s.story = '拘押期满，你重新回到市井。请检查错过的订单、房费与货物。';
+        log(s, s.story);
+        break;
       case 'reserveRequest': {
         const r = s.marketOffers.requests.find(
           (r) => r.id === action.requestId,
@@ -2436,9 +2491,22 @@ function applyAction(
             };
           }
         }
-        recordStoryChoice(q, c, s.clock.minute);
-        s.story = c.text;
-        log(s, c.text);
+        let influenceText = '';
+        if (c.influence && !rewarded) {
+          performInfluence(s, c.influence.method, c.influence.good, false);
+          influenceText = s.story;
+        }
+        recordStoryChoice(
+          q,
+          c.influence?.caughtNext &&
+            s.marketControl.jailedUntil > s.clock.minute
+            ? { ...c, next: c.influence.caughtNext }
+            : c,
+          s.clock.minute,
+        );
+        if (influenceText) q.history.at(-1)!.text += ' ' + influenceText;
+        s.story = c.text + (influenceText ? ' ' + influenceText : '');
+        log(s, s.story);
         break;
       }
       case 'storyBuy': {
@@ -2491,7 +2559,7 @@ function applyAction(
           : asking
             ? w.clue
             : s.day >= w.start && w.truth !== 'false'
-              ? `${w.publicText} 目前${GOODS[w.good].name}买价${quote(s, w.good).buy}文，请与此前牌价比较。`
+              ? `${w.publicText} 目前${GOODS[w.good].name}牌价${quote(s, w.good).buy}文，请与此前牌价比较。`
               : '截至回访，未见约定的公开动静；这条消息没有兑现。';
         if (!asking)
           entry.status = !w
@@ -2847,7 +2915,7 @@ function applyAction(
           }
         }
         s.story = c.text;
-        log(s, c.text);
+        log(s, s.story);
         s.event = null;
         break;
       }
@@ -2936,7 +3004,8 @@ export function readSave(raw: string): GameState {
   try {
     const s = JSON.parse(raw) as GameState;
     if (
-      s.saveRevision !== 5 ||
+      s.saveRevision !== 6 ||
+      !validMarketControl(s) ||
       !validStories(s) ||
       s.version !== 4 ||
       !validClock(s.clock) ||
@@ -3076,7 +3145,27 @@ export function readSave(raw: string): GameState {
         (g) =>
           Number.isSafeInteger(s.prices[g].buy) &&
           Number.isSafeInteger(s.prices[g].sell) &&
-          s.prices[g].buy > s.prices[g].sell,
+          s.prices[g].buy > 0 &&
+          s.prices[g].buy === s.prices[g].sell,
+      )
+    )
+      throw Error();
+    if (
+      !Array.isArray(s.history) ||
+      s.history.length < 1 ||
+      s.history.length > 14 ||
+      s.history.some(
+        (entry, index) =>
+          !Number.isSafeInteger(entry.day) ||
+          entry.day < 1 ||
+          entry.day > s.day ||
+          (index > 0 && entry.day <= s.history[index - 1].day) ||
+          !GOOD_IDS.every(
+            (good) =>
+              Number.isSafeInteger(entry.prices[good].buy) &&
+              entry.prices[good].buy > 0 &&
+              entry.prices[good].sell === entry.prices[good].buy,
+          ),
       )
     )
       throw Error();

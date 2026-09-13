@@ -237,6 +237,7 @@ export interface GameState {
     wakeSummary: { at: number; lines: string[] } | null;
   };
   commerce: CommerceState;
+  marketControl: import('./market-control.ts').MarketControl;
   saveRevision: number;
   operationHistory: OperationResult[];
   version: number;
@@ -317,6 +318,12 @@ export type WaitTarget =
   | { kind: 'delivery'; orderId: number; transport?: Transport };
 
 export type Action =
+  | {
+      type: 'influenceMarket';
+      method: import('./market-control.ts').MarketMethod;
+      good: Good;
+    }
+  | { type: 'serveSentence' }
   | { type: 'closeDay'; bed: Bed; meal?: Exclude<Meal, 'none'> }
   | { type: 'waitUntil'; target: WaitTarget }
   | { type: 'buyLot'; lotId: string; transport?: Transport }

@@ -28,8 +28,171 @@ const end = (
 const leave = (text: string) =>
   choose('decline', '婉辞这件事', text, 'declined', { minutes: 0 });
 
-/** Branches are authored explicitly: no random outcome can replace a chosen route. */
+/** Authored decisions define routes; explicitly marked illegal acts may branch on arrest. */
 export const STORIES: StoryDefinition[] = [
+  {
+    id: 'tea-price',
+    title: '一张茶单，两种生意',
+    focus: 'trade',
+    opening: 'opening',
+    stages: [
+      {
+        id: 'opening',
+        title: '茶行门前',
+        person: '茶商许衡',
+        text: '许衡捏着外埠茶单：船已泊岸，买家却在观望。他想邀茶客试饮；掮客罗七却提议传一句“茶船误期”，等牌价抬高再卖。许衡请你自己选。',
+        objective:
+          '选择招徕买家、联络来货，或冒险散布紧缺消息。市场也可随时自行奔走。',
+        choices: [
+          choose(
+            'promote',
+            '替许衡招徕茶客',
+            '你拿着真实货样去请买家，许衡答应若有客人登门便请你补齐茶席。',
+            'tea-table',
+            { minutes: 0, influence: { method: 'promote', good: 'tea' } },
+          ),
+          choose(
+            'import',
+            '帮船主联络来货',
+            '你请船主公开货单，改走供货合作。行情是否回落，要看各家肯不肯收货。',
+            'ship-letter',
+            { minutes: 0, influence: { method: 'import', good: 'tea' } },
+          ),
+          choose(
+            'rumor',
+            '接受罗七的假消息生意',
+            '你决定冒险虚构茶船误期。罗七不会替你承担官府追查。',
+            'speculation',
+            {
+              minutes: 0,
+              influence: { method: 'rumor', good: 'tea', caughtNext: 'court' },
+            },
+          ),
+          leave('你不接这笔生意，继续按自己的判断买卖。'),
+        ],
+      },
+      {
+        id: 'tea-table',
+        title: '真实的一席茶',
+        person: '许衡',
+        deadlineMinutes: 2880,
+        timeout: 'late',
+        text: '几位茶客愿意坐下来尝货。许衡不保证牌价，只请你备四个炊饼，按100文结算，往后带你认识收货行商。',
+        objective: '两日内交付炊饼4个，或放下茶席。',
+        choices: [
+          choose(
+            'deliver',
+            '交付茶席炊饼',
+            '茶席摆成，许衡把你介绍给相熟行商。此后做生意靠货样与履约。',
+            'honest-end',
+            {
+              destination: 'market',
+              cost: { goods: { bread: 4 } },
+              reward: { cash: 100, customer: 'merchant', reputation: 1 },
+            },
+          ),
+          leave('你说明备不齐茶席，许衡另找人采购。'),
+        ],
+      },
+      {
+        id: 'ship-letter',
+        title: '船主的回信',
+        person: '船主周成',
+        waitMinutes: 1440,
+        text: '周成请你把真实到货单交给摆渡人存证。他愿意介绍沿河运货的人，但不会许诺低价或包销。',
+        objective: '花时间核对实货，建立运输合作。',
+        choices: [
+          choose(
+            'verify',
+            '核对来货并认门',
+            '周成与摆渡人一起签下货单。你有了能直接核对船期的熟人。',
+            'supply-end',
+            {
+              minutes: 45,
+              cost: { stamina: 8 },
+              reward: { customer: 'ferryman', reputation: 1 },
+            },
+          ),
+          leave('你没有继续跟单，船主自行安排卸货。'),
+        ],
+      },
+      {
+        id: 'speculation',
+        title: '抬价之后',
+        person: '罗七',
+        text: '罗七提醒你：没人保证接盘，06:00就会重新议价。账上的浮盈只有实际卖出才算数。他还想让你下次继续，你也可以就此抽身。',
+        objective: '自行到市场按现价买卖；决定是否公开更正消息。',
+        choices: [
+          choose(
+            'correct',
+            '向许衡更正假消息',
+            '你向许衡说明消息虚构。他不再替罗七担保，但愿意日后看你如何履约。',
+            'corrected-end',
+            { minutes: 30, reward: { reputation: 1 } },
+          ),
+          choose(
+            'leave-ring',
+            '与罗七断开来往',
+            '你收好账本独自离开，不再替罗七传话。涨跌与库存留给自己处理。',
+            'risk-end',
+          ),
+        ],
+      },
+      {
+        id: 'court',
+        title: '茶单成了证据',
+        person: '市司书吏',
+        text: '实到货单戳穿了误期消息。罚款已扣，拘押必须服满。期满后可以向许衡说明原委，或承担责任就此离开。',
+        objective: '先服满拘押，再决定如何面对受牵连的茶商。',
+        choices: [
+          choose(
+            'apologize',
+            '向许衡赔礼说明',
+            '你认下自己的选择。许衡收下道歉，却不肯给你介绍买家；这段交情须从头来过。',
+            'corrected-end',
+            { minutes: 30 },
+          ),
+          choose(
+            'accept',
+            '认罚结束此事',
+            '你带着罚款记录离开市司，错过的货期和库存仍须自行收拾。',
+            'risk-end',
+          ),
+        ],
+      },
+      end(
+        'honest-end',
+        '凭货样结交',
+        '许衡',
+        '茶席成了新的供货关系，价格仍随市况起落。',
+      ),
+      end(
+        'supply-end',
+        '沿河的熟人',
+        '周成',
+        '真实货单连起了运输合作，行情回落也能成为采购机会。',
+      ),
+      end(
+        'corrected-end',
+        '更正与代价',
+        '许衡',
+        '你更正了虚构的消息，已经发生的费用、涨跌与处罚不会撤销。',
+      ),
+      end(
+        'risk-end',
+        '留下自己的账',
+        '罗七',
+        '这场冒险结束，手里的货与实际盈亏留在账本中。',
+      ),
+      end(
+        'late',
+        '错过茶席',
+        '许衡',
+        '茶席没有等到约定的炊饼，许衡另找人供货，报酬与介绍作罢。',
+      ),
+      end('declined', '各做各的生意', '许衡', '你没有继续承担这件事。'),
+    ],
+  },
   {
     id: 'broken-eggs',
     title: '一篮碎蛋与一纸欠账',

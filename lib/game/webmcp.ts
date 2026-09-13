@@ -1,3 +1,4 @@
+import { MARKET_METHODS } from './market-control.ts';
 import { knownIntel } from './intelligence.ts';
 import { citySchedule, fatigueLabel } from './time.ts';
 import { knownStory } from './story-engine.ts';
@@ -50,6 +51,7 @@ export function publicState(s: GameState | null) {
     clock: s.clock,
     fatigue: fatigueLabel(s.clock.fatigueMinutes),
     home: s.home,
+    marketControl: { ...s.marketControl, methods: MARKET_METHODS },
     marketOpportunities: publicOpportunities(s),
     life: s.life,
     meals: MEALS,
@@ -330,6 +332,7 @@ export function registerGameTools(
               good: { enum: GOOD_IDS },
               quantity: { type: 'number' },
               side: { enum: ['buy', 'sell'] },
+              method: { enum: Object.keys(MARKET_METHODS) },
               id: { type: 'string' },
               eventId: { type: 'integer' },
               storyId: { type: 'integer' },

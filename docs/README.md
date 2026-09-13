@@ -1,8 +1,10 @@
 # 项目文档索引
 
-当前版本：v4连续时间经营，已接入茶馆与分支故事更新（存档修订5）。先读根目录 [玩法与开发说明](../README.md)，验证结论以 [最新验收报告](../TEST_REPORT.md) 为准。
+当前版本：v4连续时间经营，已接入统一牌价与行情干预（存档修订6）。先读根目录 [玩法与开发说明](../README.md)，验证结论以 [最新验收报告](../TEST_REPORT.md) 为准。
 
 ## 当前设计与实现
+
+- [统一牌价与主动影响行情](plans/MARKET_CONTROL_PLAN.md)：合法/违法手段、罚款拘押、茶商分支故事及验证入口。
 
 - [茶馆情报、意外事件与分支任务线](plans/TEAHOUSE_INTELLIGENCE_PLAN.md)：强制现场弹窗、六条分支故事、实际经营效果及验收清单。
 
@@ -18,6 +20,9 @@
 - [首日沉浸体验更新](reports/IMMERSIVE_UX_UPDATE.md)：街巷招工、时辰表、住宅分组、跨日文案与按钮对齐。
 
 ## 历史归档
+
+- [行情更新前验收记录](archive/TEST_REPORT_PRE_MARKET_CONTROL.md)：此前茶馆、账本、界面与项目整理记录。
+- [2026-09-09初始审查](archive/initial-audit-2026-09-09/REVIEW.md)：早期版本缺陷快照，附当时的复现脚本，不代表当前状态。
 
 - [细节优化前验收记录](archive/TEST_REPORT_PRE_DETAIL_REFINEMENTS.md)：工作台、初版美术与v4时间系统的原始验收结论。
 
